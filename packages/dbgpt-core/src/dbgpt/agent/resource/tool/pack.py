@@ -24,15 +24,13 @@ def _is_function_tool(resources: Any) -> bool:
 def _to_tool_list(resources: ToolResourceType) -> List[BaseTool]:
     if isinstance(resources, BaseTool):
         return [resources]
-    elif isinstance(resources, list) and all(
-        isinstance(r, BaseTool) for r in resources
-    ):
-        return cast(List[BaseTool], resources)
-    elif isinstance(resources, list) and all(_is_function_tool(r) for r in resources):
-        return [cast(FunctionTool, getattr(r, "_tool")) for r in resources]
     elif _is_function_tool(resources):
         function_tool = cast(FunctionTool, getattr(resources, "_tool"))
         return [function_tool]
+    elif isinstance(resources, list):
+        base_tools = [r for r in resources if isinstance(r, BaseTool)]
+        func_tools = [cast(FunctionTool, getattr(r, "_tool")) for r in resources if _is_function_tool(r)]
+        return cast(List[BaseTool], base_tools) + func_tools
     raise ValueError("Invalid tool resource type")
 
 
