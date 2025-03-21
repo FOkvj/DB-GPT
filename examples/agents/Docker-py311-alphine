@@ -1,0 +1,49 @@
+FROM python:3.11-alpine
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装必要工具，包括Rust依赖
+RUN apk update && \
+    apk add --no-cache \
+    curl \
+    procps \
+    bash \
+    git \
+    openssh \
+    ca-certificates \
+    wget \
+    gcc \
+    musl-dev \
+    make \
+    rust \
+    cargo
+
+# 安装uv - 使用预编译的二进制文件
+RUN wget -O /tmp/uv.tar.gz https://github.com/astral-sh/uv/releases/download/0.6.3/uv-x86_64-unknown-linux-musl.tar.gz && \
+    mkdir -p /tmp/uv-extract && \
+    tar xzf /tmp/uv.tar.gz -C /tmp/uv-extract && \
+    find /tmp/uv-extract -name "uv" -type f -exec mv {} /usr/local/bin/ \; && \
+    chmod +x /usr/local/bin/uv && \
+    rm -rf /tmp/uv.tar.gz /tmp/uv-extract
+
+# 配置Rust环境变量
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+# 清理APK缓存减小镜像体积
+RUN rm -rf /var/cache/apk/*
+
+# 设置Python环境变量
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# 验证安装
+RUN python --version && \
+    uv --version && \
+    rustc --version && \
+    cargo --version
+
+# 容器启动命令
+CMD ["bash"]
