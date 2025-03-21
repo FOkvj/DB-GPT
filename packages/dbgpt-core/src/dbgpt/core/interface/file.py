@@ -16,6 +16,7 @@ import requests
 from dbgpt.component import BaseComponent, ComponentType, SystemApp
 from dbgpt.util.tracer import root_tracer, trace
 
+from ...util import BaseParameters, RegisterParameters
 from .storage import (
     InMemoryStorage,
     QuerySpec,
@@ -114,6 +115,18 @@ class FileMetadata(StorageItem):
         self.custom_metadata = obj.custom_metadata
         self.file_hash = obj.file_hash
         self._identifier = obj._identifier
+
+
+@dataclasses.dataclass
+class StorageBackendConfig(BaseParameters, RegisterParameters):
+    """Storage backend configuration"""
+
+    __type__ = "___storage_backend_config___"
+    __cfg_type__ = "utils"
+
+    def create_storage(self) -> "StorageBackend":
+        """Create the storage"""
+        raise NotImplementedError()
 
 
 class FileStorageURI:
@@ -265,6 +278,16 @@ class LocalFileStorage(StorageBackend):
         return False
 
 
+def calculate_file_hash(file_data: BinaryIO, buffer_size: int) -> str:
+    """Calculate the MD5 hash of the file data."""
+    hasher = hashlib.md5()
+    file_data.seek(0)
+    while chunk := file_data.read(buffer_size):
+        hasher.update(chunk)
+    file_data.seek(0)
+    return hasher.hexdigest()
+
+
 class FileStorageSystem:
     """File storage system."""
 
@@ -287,12 +310,7 @@ class FileStorageSystem:
         """Calculate the MD5 hash of the file data."""
         if not self.check_hash:
             return "-1"
-        hasher = hashlib.md5()
-        file_data.seek(0)
-        while chunk := file_data.read(self._save_chunk_size):
-            hasher.update(chunk)
-        file_data.seek(0)
-        return hasher.hexdigest()
+        return calculate_file_hash(file_data, self._save_chunk_size)
 
     @trace("file_storage_system.save_file")
     def save_file(
@@ -302,9 +320,10 @@ class FileStorageSystem:
         file_data: BinaryIO,
         storage_type: str,
         custom_metadata: Optional[Dict[str, Any]] = None,
+        file_id: Optional[str] = None,
     ) -> str:
         """Save the file data to the storage backend."""
-        file_id = str(uuid.uuid4())
+        file_id = str(uuid.uuid4()) if not file_id else file_id
         backend = self.storage_backends.get(storage_type)
         if not backend:
             raise ValueError(f"Unsupported storage type: {storage_type}")
@@ -422,6 +441,18 @@ class FileStorageSystem:
         fid = FileMetadataIdentifier(file_id=file_id, bucket=bucket)
         return self.metadata_storage.load(fid, FileMetadata)
 
+    def get_file_metadata_by_uri(self, uri: str) -> Optional[FileMetadata]:
+        """Get the file metadata by URI.
+
+        Args:
+            uri (str): The file URI
+
+        Returns:
+            Optional[FileMetadata]: The file metadata
+        """
+        parsed_uri = FileStorageURI.parse(uri)
+        return self.get_file_metadata(parsed_uri.bucket, parsed_uri.file_id)
+
     def delete_file(self, uri: str) -> bool:
         """Delete the file data from the storage backend.
 
@@ -470,6 +501,8 @@ class FileStorageClient(BaseComponent):
         self,
         system_app: Optional[SystemApp] = None,
         storage_system: Optional[FileStorageSystem] = None,
+        save_chunk_size: int = 1024 * 1024,
+        default_storage_type: Optional[str] = None,
     ):
         """Initialize the file storage client."""
         super().__init__(system_app=system_app)
@@ -484,9 +517,14 @@ class FileStorageClient(BaseComponent):
                     )
                 }
             )
+        if not default_storage_type:
+            if storage_system and storage_system.storage_backends:
+                default_storage_type = list(storage_system.storage_backends.keys())[0]
 
         self.system_app = system_app
         self._storage_system = storage_system
+        self.save_chunk_size = save_chunk_size
+        self.default_storage_type = default_storage_type
 
     def init_app(self, system_app: SystemApp):
         """Initialize the application."""
@@ -503,8 +541,9 @@ class FileStorageClient(BaseComponent):
         self,
         bucket: str,
         file_path: str,
-        storage_type: str,
+        storage_type: Optional[str] = None,
         custom_metadata: Optional[Dict[str, Any]] = None,
+        file_id: Optional[str] = None,
     ) -> str:
         """Upload a file to the storage system.
 
@@ -514,13 +553,20 @@ class FileStorageClient(BaseComponent):
             storage_type (str): The storage type
             custom_metadata (Dict[str, Any], optional): Custom metadata. Defaults to
                 None.
+            file_id (str, optional): The file ID. Defaults to None. If not provided, a
+                random UUID will be generated.
 
         Returns:
             str: The file URI
         """
         with open(file_path, "rb") as file:
             return self.save_file(
-                bucket, os.path.basename(file_path), file, storage_type, custom_metadata
+                bucket,
+                os.path.basename(file_path),
+                file,
+                storage_type,
+                custom_metadata,
+                file_id,
             )
 
     def save_file(
@@ -528,8 +574,9 @@ class FileStorageClient(BaseComponent):
         bucket: str,
         file_name: str,
         file_data: BinaryIO,
-        storage_type: str,
+        storage_type: Optional[str] = None,
         custom_metadata: Optional[Dict[str, Any]] = None,
+        file_id: Optional[str] = None,
     ) -> str:
         """Save the file data to the storage system.
 
@@ -540,27 +587,79 @@ class FileStorageClient(BaseComponent):
             storage_type (str): The storage type
             custom_metadata (Dict[str, Any], optional): Custom metadata. Defaults to
                 None.
+            file_id(str, optional): The file ID. Defaults to None. If not provided, a
+                random UUID will be generated.
 
         Returns:
             str: The file URI
         """
+        if not storage_type:
+            storage_type = self.default_storage_type
+        if not storage_type:
+            raise ValueError("Storage type not provided")
         return self.storage_system.save_file(
-            bucket, file_name, file_data, storage_type, custom_metadata
+            bucket, file_name, file_data, storage_type, custom_metadata, file_id
         )
 
-    def download_file(self, uri: str, destination_path: str) -> None:
+    def download_file(
+        self,
+        uri: str,
+        dest_path: Optional[str] = None,
+        dest_dir: Optional[str] = None,
+        cache: bool = True,
+    ) -> Tuple[str, FileMetadata]:
         """Download a file from the storage system.
+
+        If dest_path is provided, the file will be saved to that path.
+        If dest_dir is provided, the file will be saved to that directory with
+        file ID and extension.
+
+        If neither dest_path nor dest_dir is provided, the file will be saved to the
+        system temp directory.
 
         Args:
             uri (str): The file URI
-            destination_path (str): The destination
+            dest_path (str, optional): The destination path. Defaults to None.
+            dest_dir (str, optional): The destination directory. Defaults to None.
+            cache (bool, optional): Whether to cache the file. Defaults to True.
 
         Raises:
             FileNotFoundError: If the file is not found
         """
+        file_metadata = self.storage_system.get_file_metadata_by_uri(uri)
+        if not file_metadata:
+            raise FileNotFoundError(f"File not found: {uri}")
+
+        extension = os.path.splitext(file_metadata.file_name)[1]
+        if dest_path:
+            target_path = dest_path
+        elif dest_dir:
+            os.makedirs(dest_dir, exist_ok=True)
+            target_path = os.path.join(dest_dir, file_metadata.file_id + extension)
+        else:
+            from pathlib import Path
+
+            # Write to system temp directory
+            base_path = str(Path.home() / ".cache" / "dbgpt" / "files")
+            os.makedirs(base_path, exist_ok=True)
+            target_path = os.path.join(base_path, file_metadata.file_id + extension)
+        file_hash = file_metadata.file_hash
+        if os.path.exists(target_path) and cache:
+            logger.debug(f"File {target_path} already exists, begin hash check")
+            with open(target_path, "rb") as f:
+                if file_hash == calculate_file_hash(f, self.save_chunk_size):
+                    logger.info(f"File {uri} already exists at {target_path}")
+                    return target_path, file_metadata
+        logger.info(f"Downloading file {uri} to {target_path}")
         file_data, _ = self.storage_system.get_file(uri)
-        with open(destination_path, "wb") as f:
-            f.write(file_data.read())
+
+        with open(target_path, "wb") as f:
+            while True:
+                chunk = file_data.read(self.save_chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+        return target_path, file_metadata
 
     def get_file(self, uri: str) -> Tuple[BinaryIO, FileMetadata]:
         """Get the file data from the storage system.

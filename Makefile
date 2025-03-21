@@ -16,17 +16,22 @@ $(VENV)/bin/activate: $(VENV)/.venv-timestamp
 
 $(VENV)/.venv-timestamp: uv.lock
 	# Create new virtual environment if setup.py has changed
-	#python3 -m venv $(VENV)
-	uv venv --python 3.10 $(VENV)
+	uv venv --python 3.11 $(VENV)
 	uv pip install --prefix $(VENV) ruff
+	uv pip install --prefix $(VENV) mypy
 	touch $(VENV)/.venv-timestamp
 
 testenv: $(VENV)/.testenv
 
 $(VENV)/.testenv: $(VENV)/bin/activate
-	# $(VENV_BIN)/pip install -e ".[framework]"
-	# the openai optional dependency is include framework and rag dependencies
-	$(VENV_BIN)/pip install -e ".[openai]"
+	. $(VENV_BIN)/activate && uv sync --active --all-packages \
+		--extra "base" \
+		--extra "proxy_openai" \
+		--extra "rag" \
+		--extra "storage_chromadb" \
+		--extra "dbgpts" \
+		--link-mode=copy
+	cp .devcontainer/dbgpt.pth $(VENV)/lib/python3.11/site-packages
 	touch $(VENV)/.testenv
 
 
@@ -65,7 +70,7 @@ fmt-check: setup ## Check Python code formatting and style without making change
 pre-commit: fmt-check test test-doc mypy ## Run formatting and unit tests before committing
 
 test: $(VENV)/.testenv ## Run unit tests
-	$(VENV_BIN)/pytest dbgpt
+	$(VENV_BIN)/pytest --pyargs dbgpt
 
 .PHONY: test-doc
 test-doc: $(VENV)/.testenv ## Run doctests
@@ -75,7 +80,8 @@ test-doc: $(VENV)/.testenv ## Run doctests
 .PHONY: mypy
 mypy: $(VENV)/.testenv ## Run mypy checks
 	# https://github.com/python/mypy
-	$(VENV_BIN)/mypy --config-file .mypy.ini dbgpt/rag/ dbgpt/datasource/ dbgpt/client/ dbgpt/agent/ dbgpt/vis/ dbgpt/experimental/
+	$(VENV_BIN)/mypy --config-file .mypy.ini --ignore-missing-imports packages/dbgpt-core/
+	# $(VENV_BIN)/mypy --config-file .mypy.ini dbgpt/rag/ dbgpt/datasource/ dbgpt/client/ dbgpt/agent/ dbgpt/vis/ dbgpt/experimental/
 	# rag depends on core and storage, so we not need to check it again.
 	# $(VENV_BIN)/mypy --config-file .mypy.ini dbgpt/storage/
 	# $(VENV_BIN)/mypy --config-file .mypy.ini dbgpt/core/
@@ -83,7 +89,7 @@ mypy: $(VENV)/.testenv ## Run mypy checks
 
 .PHONY: coverage
 coverage: setup ## Run tests and report coverage
-	$(VENV_BIN)/pytest dbgpt --cov=dbgpt
+	$(VENV_BIN)/pytest --pyargs dbgpt --cov=dbgpt
 
 .PHONY: clean
 clean: ## Clean up the environment
@@ -97,14 +103,19 @@ clean: ## Clean up the environment
 clean-dist: ## Clean up the distribution
 	rm -rf dist/ *.egg-info build/
 
-.PHONY: package
-package: clean-dist ## Package the project for distribution
-	IS_DEV_MODE=false python setup.py sdist bdist_wheel
+.PHONY: build 
+build: clean-dist ## Package the project for distribution
+	uv build --all-packages
+	rm -rf dist/dbgpt_app-*
+	rm -rf dist/dbgpt_serve-*
 
-.PHONY: upload
-upload: ## Upload the package to PyPI
-	# upload to testpypi: twine upload --repository testpypi dist/*
-	twine upload dist/*
+.PHONY: publish
+publish: build ## Upload the package to PyPI
+	uv publish
+
+.PHONY: publish-test
+publish-test: build ## Upload the package to PyPI
+	uv publish --index testpypi
 
 .PHONY: help
 help:  ## Display this help screen

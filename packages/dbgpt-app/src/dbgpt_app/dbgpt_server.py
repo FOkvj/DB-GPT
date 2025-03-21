@@ -112,7 +112,7 @@ def initialize_app(param: ApplicationConfig, args: List[str] = None):
     If you use gunicorn as a process manager, initialize_app can be invoke in
     `on_starting` hook.
     Args:
-        param:WebWerverParameters
+        param:WebServerParameters
         args:List[str]
     """
 
@@ -126,7 +126,6 @@ def initialize_app(param: ApplicationConfig, args: List[str] = None):
         log_config,
         default_logger_filename=os.path.join(LOGDIR, "dbgpt_webserver.log"),
     )
-    print(param)
 
     server_init(param, system_app)
     mount_routers(app)
@@ -257,7 +256,9 @@ def run_webserver(config_file: str):
 
 def scan_configs():
     from dbgpt.model import scan_model_providers
+    from dbgpt_app.initialization.app_initialization import scan_app_configs
     from dbgpt_app.initialization.serve_initialization import scan_serve_configs
+    from dbgpt_ext.storage import scan_storage_configs
     from dbgpt_serve.datasource.manages.connector_manager import ConnectorManager
 
     cm = ConnectorManager(system_app)
@@ -267,9 +268,14 @@ def scan_configs():
     scan_model_providers()
     # Register all serve configs
     scan_serve_configs()
+    # Register all storage configs
+    scan_storage_configs()
+    # Register all app configs
+    scan_app_configs()
 
 
 def load_config(config_file: str = None) -> ApplicationConfig:
+    from dbgpt._private.config import Config
     from dbgpt.configs.model_config import ROOT_PATH as DBGPT_ROOT_PATH
 
     if config_file is None:
@@ -287,6 +293,8 @@ def load_config(config_file: str = None) -> ApplicationConfig:
     sys_config = cfg.parse_config(SystemParameters, prefix="system")
     # Must set default language before any i18n usage
     set_default_language(sys_config.language)
+    _CFG = Config()
+    _CFG.LANGUAGE = sys_config.language
 
     # Scan all configs
     scan_configs()

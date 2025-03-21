@@ -1,15 +1,21 @@
-import markdownComponents from '@/components/chat/chat-content/config';
+import markdownComponents, { markdownPlugins, preprocessLaTeX } from '@/components/chat/chat-content/config';
 import { IChatDialogueMessageSchema } from '@/types/chat';
 import { STORAGE_USERINFO_KEY } from '@/utils/constants/index';
-import { CheckOutlined, ClockCircleOutlined, CloseOutlined, CodeOutlined, LoadingOutlined } from '@ant-design/icons';
+import {
+  CheckOutlined,
+  ClockCircleOutlined,
+  CloseOutlined,
+  CodeOutlined,
+  CopyOutlined,
+  LoadingOutlined,
+} from '@ant-design/icons';
 import { GPTVis } from '@antv/gpt-vis';
+import { message } from 'antd';
 import classNames from 'classnames';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import React, { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import rehypeRaw from 'rehype-raw';
-import remarkGfm from 'remark-gfm';
 import Feedback from './Feedback';
 import RobotIcon from './RobotIcon';
 
@@ -152,8 +158,8 @@ const ChatContent: React.FC<{
             </div>
             {result ? (
               <div className='px-4 md:px-6 py-4 text-sm'>
-                <GPTVis components={markdownComponents} rehypePlugins={[rehypeRaw]} remarkPlugins={[remarkGfm]}>
-                  {result ?? ''}
+                <GPTVis components={markdownComponents} {...markdownPlugins}>
+                  {preprocessLaTeX(result ?? '')}
                 </GPTVis>
               </div>
             ) : (
@@ -173,8 +179,36 @@ const ChatContent: React.FC<{
       <div className={`flex ${scene === 'chat_agent' && !thinking ? 'flex-1' : ''} overflow-hidden`}>
         {/* 用户提问 */}
         {!isRobot && (
-          <div className='flex flex-1 items-center text-sm text-[#1c2533] dark:text-white'>
-            {typeof context === 'string' && context}
+          <div className='flex flex-1 relative group'>
+            <div
+              className='flex-1 text-sm text-[#1c2533] dark:text-white'
+              style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+            >
+              {typeof context === 'string' && context}
+            </div>
+            {typeof context === 'string' && context.trim() && (
+              <div className='absolute right-0 top-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200'>
+                <button
+                  className='flex items-center justify-center w-8 h-8 text-[#525964] dark:text-[rgba(255,255,255,0.6)] hover:text-[#1677ff] dark:hover:text-white transition-colors'
+                  onClick={() => {
+                    if (typeof context === 'string') {
+                      navigator.clipboard
+                        .writeText(context)
+                        .then(() => {
+                          message.success(t('copy_to_clipboard_success'));
+                        })
+                        .catch(err => {
+                          console.error(t('copy_to_clipboard_failed'), err);
+                          message.error(t('copy_to_clipboard_failed'));
+                        });
+                    }
+                  }}
+                  title={t('copy_to_clipboard')}
+                >
+                  <CopyOutlined />
+                </button>
+              </div>
+            )}
           </div>
         )}
         {/* ai回答 */}
@@ -191,8 +225,8 @@ const ChatContent: React.FC<{
                 </div>
               )}
               {typeof context === 'string' && scene === 'chat_agent' && (
-                <GPTVis components={{ ...markdownComponents }} rehypePlugins={[rehypeRaw]} remarkPlugins={[remarkGfm]}>
-                  {formatMarkdownValForAgent(value)}
+                <GPTVis components={markdownComponents} {...markdownPlugins}>
+                  {preprocessLaTeX(formatMarkdownValForAgent(value))}
                 </GPTVis>
               )}
               {typeof context === 'string' && scene !== 'chat_agent' && (
@@ -202,10 +236,9 @@ const ChatContent: React.FC<{
                       ...markdownComponents,
                       ...extraMarkdownComponents,
                     }}
-                    rehypePlugins={[rehypeRaw]}
-                    remarkPlugins={[remarkGfm]}
+                    {...markdownPlugins}
                   >
-                    {formatMarkdownVal(value)}
+                    {preprocessLaTeX(formatMarkdownVal(value))}
                   </GPTVis>
                 </div>
               )}

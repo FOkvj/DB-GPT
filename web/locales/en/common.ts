@@ -341,6 +341,9 @@ export const CommonEn = {
   All: 'All',
   Please_input_prompt_name: 'Please input prompt name',
   Copy_Btn: 'Copy',
+  copy_to_clipboard: 'Copy to clipboard',
+  copy_to_clipboard_success: 'Copy to clipboard success',
+  copy_to_clipboard_failed: 'Copy to clipboard failed',
   Delete_Btn: 'Delete',
   publish: 'Publish',
   unpublish: 'Unpublished',
@@ -354,4 +357,5 @@ export const CommonEn = {
   workflow: 'Workflow',
   resources: 'Resources',
   app: 'App',
+  please_select_resource_type: 'Please select resource type',
 } as const;

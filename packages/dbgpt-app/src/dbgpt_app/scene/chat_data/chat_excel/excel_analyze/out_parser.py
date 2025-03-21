@@ -2,10 +2,7 @@ import json
 import logging
 from typing import NamedTuple
 
-from dbgpt._private.config import Config
 from dbgpt.core.interface.output_parser import BaseOutputParser
-
-CFG = Config()
 
 
 class ExcelAnalyzeResponse(NamedTuple):
@@ -18,12 +15,12 @@ logger = logging.getLogger(__name__)
 
 
 class ChatExcelOutputParser(BaseOutputParser):
-    def __init__(self, is_stream_out: bool, **kwargs):
+    def __init__(self, is_stream_out: bool = True, **kwargs):
         super().__init__(is_stream_out=is_stream_out, **kwargs)
 
     def parse_prompt_response(self, model_out_text):
         clean_str = super().parse_prompt_response(model_out_text)
-        print("clean prompt response:", clean_str)
+        logger.info("clean prompt response:", clean_str)
         try:
             response = json.loads(clean_str)
             for key in sorted(response):

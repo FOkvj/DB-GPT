@@ -98,6 +98,7 @@ This tutorial assumes that you can establish network communication with the depe
     {label: 'GLM4 (local)', value: 'glm-4'},
     {label: 'VLLM (local)', value: 'vllm'},
     {label: 'LLAMA_CPP (local)', value: 'llama_cpp'},
+    {label: 'Ollama (proxy)', value: 'ollama'},
   ]}>
 
   <TabItem value="openai" label="OpenAI(proxy)">
@@ -164,8 +165,10 @@ uv sync --all-packages \
 --extra "rag" \
 --extra "storage_chromadb" \
 --extra "dbgpts" \
---extra "hf" 
+--extra "hf" \
+--extra "cpu"
 ```
+
 **Model Configurations**:
 ```toml
 # Model Configurations
@@ -204,6 +207,7 @@ uv run python packages/dbgpt-app/src/dbgpt_app/dbgpt_server.py --config configs/
 # Install core dependencies and select desired extensions
 uv sync --all-packages \
 --extra "base" \
+--extra "cuda121" \
 --extra "hf" \
 --extra "rag" \
 --extra "storage_chromadb" \
@@ -248,6 +252,8 @@ uv run dbgpt start webserver --config configs/dbgpt-local-glm.toml
 # Install core dependencies and select desired extensions
 uv sync --all-packages \
 --extra "base" \
+--extra "hf" \
+--extra "cuda121" \
 --extra "vllm" \
 --extra "rag" \
 --extra "storage_chromadb" \
@@ -294,6 +300,8 @@ If you has a Nvidia GPU, you can enable the CUDA support by setting the environm
 # Install core dependencies and select desired extensions
 CMAKE_ARGS="-DGGML_CUDA=ON" uv sync --all-packages \
 --extra "base" \
+--extra "hf" \
+--extra "cuda121" \
 --extra "llama_cpp" \
 --extra "rag" \
 --extra "storage_chromadb" \
@@ -307,6 +315,7 @@ Otherwise, run the following command to install dependencies without CUDA suppor
 # Install core dependencies and select desired extensions
 uv sync --all-packages \
 --extra "base" \
+--extra "hf" \
 --extra "llama_cpp" \
 --extra "rag" \
 --extra "storage_chromadb" \
@@ -344,7 +353,85 @@ uv run dbgpt start webserver --config configs/dbgpt-local-llama-cpp.toml
 ```
 
   </TabItem>
+    <TabItem value="ollama" label="Ollama(proxy)">
+
+```bash
+# Use uv to install dependencies needed for Ollama proxy
+uv sync --all-packages \
+--extra "base" \
+--extra "proxy_ollama" \
+--extra "rag" \
+--extra "storage_chromadb" \
+--extra "dbgpts"
+```
+
+### Run Webserver
+
+To run DB-GPT with Ollama proxy, you must provide the Ollama API base in the `configs/dbgpt-proxy-ollama.toml` configuration file.
+
+```toml
+# Model Configurations
+[models]
+[[models.llms]]
+...
+api_base = "your-ollama-api-base"
+[[models.embeddings]]
+...
+api_base = "your-ollama-api-base"
+```
+
+Then run the following command to start the webserver:
+
+```bash
+uv run dbgpt start webserver --config configs/dbgpt-proxy-ollama.toml
+```
+In the above command, `--config` specifies the configuration file, and `configs/dbgpt-proxy-ollama.toml` is the configuration file for the Ollama proxy model, you can also use other configuration files or create your own configuration file according to your needs.
+
+Optionally, you can also use the following command to start the webserver:
+```bash
+uv run python packages/dbgpt-app/src/dbgpt_app/dbgpt_server.py --config configs/dbgpt-proxy-ollama.toml
+```
+
+  </TabItem>
 </Tabs>
+
+## (Optional) More Configuration
+
+You can view the configuration in [Configuration](./config/config-reference) to learn more about 
+the configuration options.
+
+For example, if you want to configure the LLM model, you can see all available options in the [LLM Configuration](./config-reference/llm/).
+
+And another example, if you want to how to configure the vllm model, you can see all available options in the [VLLM Configuration](./config-reference/llm/vllm_adapter_vllmdeploymodelparameters_1d4a24.mdx).
+
+
+## DB-GPT Install Help Tool
+
+If you need help with the installation, you can use the `uv` script to get help.
+
+```bash
+uv run install_help.py --help
+```
+
+## Generate Install Command
+
+You can use the `uv` script to generate the install command in the interactive mode.
+
+```bash
+uv run install_help.py install-cmd --interactive
+```
+
+And you can generate an install command with all the dependencies needed for the OpenAI proxy model.
+
+```bash
+uv run install_help.py install-cmd --all
+```
+
+You can found all the dependencies and extras.
+
+```bash
+uv run install_help.py list
+```
 
 
 ## Visit Website

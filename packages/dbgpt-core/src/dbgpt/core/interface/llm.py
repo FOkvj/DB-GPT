@@ -346,7 +346,16 @@ class ModelOutput:
 
     def to_dict(self) -> Dict:
         """Convert the model output to dict."""
-        return asdict(self)
+        text = self.gen_text_with_thinking()
+        return {
+            "error_code": self.error_code,
+            "text": text,
+            "incremental": self.incremental,
+            "model_context": self.model_context,
+            "finish_reason": self.finish_reason,
+            "usage": self.usage,
+            "metrics": self.metrics,
+        }
 
     @property
     def success(self) -> bool:
@@ -477,6 +486,13 @@ class ModelOutput:
             finish_reason=finish_reason,
             metrics=metrics,
         )
+
+    @property
+    def error_message(self) -> str:
+        """Get the error message.
+        Just return the error message when error_code is not 0.
+        """
+        return self.text if self.has_text else "Unknown error"
 
 
 _ModelMessageType = Union[List[ModelMessage], List[Dict[str, Any]]]
