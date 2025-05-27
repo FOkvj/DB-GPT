@@ -202,6 +202,48 @@ class OpenAPIRerankerDeployModelParameters(RerankerDeployModelParameters):
         return self.backend or self.name
 
 
+@dataclass
+class OllamaRerankerDeployModelParameters(RerankerDeployModelParameters):
+    """OpenAPI Reranker Deploy Model Parameters."""
+
+    provider: str = "proxy/ollama"
+
+    api_url: str = field(
+        default="http://localhost:11434",
+        metadata={
+            "help": _("The URL of the rerank API."),
+        },
+    )
+    api_key: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": _("The API key for the rerank API."),
+        },
+    )
+    backend: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": _(
+                "The real model name to pass to the provider, default is None. If "
+                "backend is None, use name as the real model name."
+            ),
+        },
+    )
+
+    timeout: int = field(
+        default=60,
+        metadata={
+            "help": _("The timeout for the request in seconds."),
+        },
+    )
+
+    @property
+    def real_provider_model_name(self) -> str:
+        """Get the real provider model name."""
+        return self.backend or self.name
+
+
+
 class OpenAPIRerankEmbeddings(BaseModel, RerankEmbeddings):
     """OpenAPI Rerank Embeddings."""
 

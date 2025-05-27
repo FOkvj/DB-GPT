@@ -2,9 +2,13 @@
 
 import json
 import logging
+import os
+import tempfile
 from typing import List, Optional
 
+from dbgpt._private.config import Config
 from dbgpt._private.pydantic import BaseModel, Field, model_to_dict, model_to_json
+from dbgpt.core.interface.file import FileStorageClient
 from dbgpt.vis.tags.vis_chart import Vis, VisChart
 
 from ...core.action.base import Action, ActionOutput
@@ -13,6 +17,7 @@ from ...resource.database import DBResource
 
 logger = logging.getLogger(__name__)
 
+CFG = Config()
 
 class SqlInput(BaseModel):
     """SQL input model."""
@@ -81,8 +86,26 @@ class ChartAction(Action[SqlInput]):
 
             db = db_resources[0]
             data_df = await db.query_to_df(param.sql)
+
+            file_storage_client = FileStorageClient.get_instance(
+                CFG.SYSTEM_APP, default_component=None
+            )
+            # 将df转为excel文件
+            temp_file_path = tempfile.mktemp(suffix='.xlsx', prefix='chat_db_output_')
+            data_df.to_excel(temp_file_path, index=False, engine='openpyxl')
+
+            chart_metadata = json.loads(model_to_json(param))
+
+            with open(temp_file_path, 'rb') as file_data:
+                chart_metadata["uri"] = file_storage_client.save_file(
+                    bucket="chat_db_output",
+                    file_name=temp_file_path,
+                    file_data=file_data
+                )
+            os.remove(temp_file_path)
+
             view = await self.render_protocol.display(
-                chart=json.loads(model_to_json(param)), data_df=data_df
+                chart=chart_metadata, data_df=data_df
             )
 
             param_dict = model_to_dict(param)

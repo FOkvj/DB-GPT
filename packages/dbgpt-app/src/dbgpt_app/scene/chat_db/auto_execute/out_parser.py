@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import tempfile
 import xml.etree.ElementTree as ET
 from typing import Dict, NamedTuple
 
@@ -8,6 +10,7 @@ import pandas as pd
 import sqlparse
 
 from dbgpt._private.config import Config
+from dbgpt.core.interface.file import FileStorageClient
 from dbgpt.core.interface.output_parser import BaseOutputParser
 from dbgpt.util.json_utils import serialize
 
@@ -137,6 +140,21 @@ class DbChatOutputParser(BaseOutputParser):
             if prompt_response.sql:
                 df = data(prompt_response.sql)
                 param["type"] = prompt_response.display
+                file_storage_client = FileStorageClient.get_instance(
+                    self._system_app, default_component=None
+                )
+                # 将df转为excel文件
+                temp_file_path = tempfile.mktemp(suffix='.xlsx', prefix='chat_db_output_')
+                df.to_excel(temp_file_path, index=False, engine='openpyxl')
+
+                # 读取文件
+                with open(temp_file_path, 'rb') as file_data:
+                    param["uri"] = file_storage_client.save_file(
+                        bucket="chat_db_output",
+                        file_name=temp_file_path,
+                        file_data=file_data
+                    )
+                os.remove(temp_file_path)
 
                 if param["type"] == "response_vector_chart":
                     df, visualizable = self.parse_vector_data_with_pca(df)
@@ -146,7 +164,7 @@ class DbChatOutputParser(BaseOutputParser):
 
                 param["sql"] = prompt_response.sql
                 param["data"] = json.loads(
-                    df.to_json(orient="records", date_format="iso", date_unit="s")
+                    df[1000].to_json(orient="records", date_format="iso", date_unit="s")
                 )
                 view_json_str = json.dumps(param, default=serialize, ensure_ascii=False)
                 success = True

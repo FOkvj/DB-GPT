@@ -125,3 +125,17 @@ table {
 .rc-md-editor .editor-container>.section {
   border-right: none !important;
 }
+
+/* 嵌套表格样式 */
+.nested-table .ant-table {
+  width: 100%;
+  table-layout: auto !important;
+}
+
+.nested-table .ant-table-header {
+  width: 100%;
+}
+
+.nested-table .ant-table-body {
+  overflow-x: auto;
+}

@@ -261,6 +261,7 @@ export const CommonEn = {
   copy_url: 'Click the Copy Share link',
   double_click_open: 'Double click on Nail nail to open',
   construct: ' Construct App',
+  data_process: 'Data Process',
   chat_online: 'Chat',
   recommend_apps: 'Recommend',
   all_apps: 'All',

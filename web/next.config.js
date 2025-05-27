@@ -2,6 +2,7 @@
 const CopyPlugin = require("copy-webpack-plugin");
 const MonacoWebpackPlugin = require("monaco-editor-webpack-plugin");
 const path = require("path");
+
 const nextConfig = {
   experimental: {
     esmExternals: "loose",
@@ -20,8 +21,14 @@ const nextConfig = {
   trailingSlash: true,
   images: { unoptimized: true },
   skipTrailingSlashRedirect: true,
-  webpack: (config, { isServer }) => {
+  webpack: (config, { dev, isServer }) => {
     config.resolve.fallback = { fs: false };
+    
+    // 添加开发模式下的 source map 配置
+    if (dev && !isServer) {
+      config.devtool = 'eval-source-map';
+    }
+    
     if (!isServer) {
       config.plugins.push(
         new CopyPlugin({

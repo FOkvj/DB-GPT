@@ -181,5 +181,6 @@ class KnowledgeFactory:
         from .string import StringKnowledge  # noqa: F401
         from .txt import TXTKnowledge  # noqa: F401
         from .url import URLKnowledge  # noqa: F401
+        from .zip import ZipKnowledge  # noqa: F401
 
         return Knowledge.__subclasses__()

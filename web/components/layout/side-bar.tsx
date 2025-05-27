@@ -293,6 +293,23 @@ function SideBar() {
         ),
         path: '/construct/app',
       },
+      {
+        key: 'dataprocess',
+        name: t('data_process'),
+        isActive: pathname.startsWith('/dataprocess'),
+        icon: (
+          <Image
+            key='image_dataprocess'
+            src={
+              pathname.startsWith('/dataprocess') ? '/pictures/data_process_active.png' : '/pictures/data_process.png'
+            }
+            alt='dataprocess_image'
+            width={40}
+            height={40}
+          />
+        ),
+        path: '/dataprocess',
+      },
     ];
     if (hasAdmin) {
       items.push({

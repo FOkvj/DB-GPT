@@ -2,17 +2,21 @@
 
 import json
 import logging
+import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
+from dbgpt._private.config import Config
 from dbgpt._private.pydantic import BaseModel
 from dbgpt.agent.core.schema import Status
+from dbgpt.core.interface.file import FileStorageClient
 from dbgpt.util.json_utils import serialize
 from dbgpt.util.string_utils import extract_content, extract_content_open_ending
 
 logger = logging.getLogger(__name__)
 
+CFG = Config()
 
 class PluginStatus(BaseModel):
     """A class representing the status of a plugin."""
@@ -26,7 +30,7 @@ class PluginStatus(BaseModel):
     err_msg: Optional[str] = None
     start_time: float = datetime.now().timestamp() * 1000
     end_time: Optional[str] = None
-
+    uri: Optional[str] = None # for download
     df: Any = None
 
 
@@ -316,6 +320,7 @@ class ApiCall:
         if api_status.api_result:
             data = api_status.api_result
         param["data"] = data
+        param["uri"] = api_status.uri
         return json.dumps(param, ensure_ascii=False)
 
     def run_display_sql(self, llm_text, sql_run_func):
@@ -368,6 +373,9 @@ class ApiCall:
             ) and self.check_last_plugin_call_ready(llm_text):
                 # wait api call generate complete
                 self.update_from_context(llm_text)
+                file_storage_client = FileStorageClient.get_instance(
+                    CFG.SYSTEM_APP, default_component=None
+                )
                 for key, value in self.plugin_status_map.items():
                     if value.status == Status.TODO.value:
                         value.status = Status.RUNNING.value
@@ -376,7 +384,15 @@ class ApiCall:
                             sql = value.args["sql"]
                             if sql is not None and len(sql) > 0:
                                 data_df = sql_run_func(sql)
+                                temp_file_path = tempfile.mktemp(suffix='.xlsx', prefix='chat_db_output_')
+                                data_df.to_excel(temp_file_path, index=False, engine='openpyxl')
                                 value.df = data_df
+                                with open(temp_file_path, 'rb') as file_data:
+                                    value.uri = file_storage_client.save_file(
+                                    bucket="chat_excel_output",
+                                    file_name=temp_file_path,
+                                    file_data=file_data
+                                )
                                 value.api_result = json.loads(
                                     data_df.to_json(
                                         orient="records",

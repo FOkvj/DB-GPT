@@ -1,9 +1,8 @@
-import { AutoChart, BackEndChartType, getChartType } from '@/components/chart';
-import { formatSql } from '@/utils';
+import { BackEndChartType } from '@/components/chart';
 import { LinkOutlined, ReadOutlined, SyncOutlined } from '@ant-design/icons';
 import { Datum } from '@antv/ava';
 import { GPTVis, withDefaultChartCode } from '@antv/gpt-vis';
-import { Image, Table, Tabs, TabsProps, Tag } from 'antd';
+import { Image, Tag } from 'antd';
 import 'katex/dist/katex.min.css';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
@@ -15,6 +14,7 @@ import VisChatLink from './VisChatLink';
 import VisResponse from './VisResponse';
 import AgentMessages from './agent-messages';
 import AgentPlans from './agent-plans';
+import ChartView from './chart-view';
 import { CodePreview } from './code-preview';
 import HtmlPreview from './html-preview';
 import SvgPreview from './svg-preview';
@@ -340,39 +340,15 @@ const basicComponents: MarkdownComponent = {
   },
 };
 
-const returnSqlVal = (val: string) => {
-  const punctuationMap: any = {
-    '，': ',',
-    '。': '.',
-    '？': '?',
-    '！': '!',
-    '：': ':',
-    '；': ';',
-    '“': '"',
-    '”': '"',
-    '‘': "'",
-    '’': "'",
-    '（': '(',
-    '）': ')',
-    '【': '[',
-    '】': ']',
-    '《': '<',
-    '》': '>',
-    '—': '-',
-    '、': ',',
-    '…': '...',
-  };
-  const regex = new RegExp(Object.keys(punctuationMap).join('|'), 'g');
-  return val.replace(regex, match => punctuationMap[match]);
-};
-
 const extraComponents: MarkdownComponent = {
   'chart-view': function ({ content, children }) {
     let data: {
       data: Datum[];
       type: BackEndChartType;
       sql: string;
+      uri?: string;
     };
+
     try {
       data = JSON.parse(content as string);
     } catch (e) {
@@ -384,37 +360,15 @@ const extraComponents: MarkdownComponent = {
       };
     }
 
-    const columns = data?.data?.[0]
-      ? Object.keys(data?.data?.[0])?.map(item => {
-          return {
-            title: item,
-            dataIndex: item,
-            key: item,
-          };
-        })
-      : [];
-
-    const ChartItem = {
-      key: 'chart',
-      label: 'Chart',
-      children: <AutoChart data={data?.data} chartType={getChartType(data?.type)} />,
-    };
-    const SqlItem = {
-      key: 'sql',
-      label: 'SQL',
-      children: <CodePreview code={formatSql(returnSqlVal(data?.sql), 'mysql') as string} language={'sql'} />,
-    };
-    const DataItem = {
-      key: 'data',
-      label: 'Data',
-      children: <Table dataSource={data?.data} columns={columns} scroll={{ x: true }} virtual={true} />,
-    };
-    const TabItems: TabsProps['items'] =
-      data?.type === 'response_table' ? [DataItem, SqlItem] : [ChartItem, SqlItem, DataItem];
-
     return (
       <div>
-        <Tabs defaultActiveKey={data?.type === 'response_table' ? 'data' : 'chart'} items={TabItems} size='small' />
+        <ChartView
+          data={data.data}
+          type={data.type}
+          sql={data.sql}
+          uri={data.uri}
+          deleteAfterDownload={false} // 可以根据需要设置默认值
+        />
         {children}
       </div>
     );

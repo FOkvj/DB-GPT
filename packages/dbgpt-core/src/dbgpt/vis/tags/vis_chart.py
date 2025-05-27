@@ -77,6 +77,7 @@ class VisChart(Vis):
             return None
 
         param["sql"] = sql
+        param["uri"] = chart.get("uri", "")
         param["type"] = chart.get("display_type", "response_table")
         param["title"] = chart.get("title", "")
         param["describe"] = chart.get("thought", "")

@@ -28,6 +28,7 @@ class DocumentType(Enum):
     DATASOURCE = "datasource"
     EXCEL = "xlsx"
     DOC = "doc"
+    ZIP = "zip"
 
 
 class KnowledgeType(Enum):

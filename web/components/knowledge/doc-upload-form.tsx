@@ -335,7 +335,7 @@ export default function DocUploadForm(props: IProps) {
             </p>
             <p style={{ color: 'rgb(22, 108, 255)', fontSize: '20px' }}>{t('Select_or_Drop_file')}</p>
             <p className='ant-upload-hint' style={{ color: 'rgb(22, 108, 255)' }}>
-              PDF, PowerPoint, Excel, Word, Text, Markdown, Zip1, Csv
+              PDF, PowerPoint, Excel, Word, Text, Markdown, Zip, Csv
             </p>
           </Dragger>
         </Form.Item>
