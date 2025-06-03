@@ -159,6 +159,7 @@ class ResourcePack(Resource[PackResourceParameters]):
                 resource_copy._resources = {
                     resource.name: resource for resource in resources
                 }
+                return resource_copy
             else:
                 if apply_func is not None:
                     return apply_func(resource)

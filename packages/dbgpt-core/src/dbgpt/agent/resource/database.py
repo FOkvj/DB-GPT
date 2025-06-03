@@ -16,7 +16,7 @@ from .base import P, Resource, ResourceParameters, ResourceType
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PROMPT_TEMPLATE = (
-    "Database type: {db_type}, related table structure definition: {schemas}"
+    "Database type: {db_type}, Database name: {db_name}, related table structure definition: {schemas}"
 )
 _DEFAULT_PROMPT_TEMPLATE_ZH = "数据库类型：{db_type}，相关表结构定义：{schemas}"
 
@@ -91,7 +91,7 @@ class DBResource(Resource[P], Generic[P]):
             self._executor, self.get_schema_link, db=self._db_name, question=question
         )
         return (
-            self._prompt_template.format(db_type=self._db_type, schemas=schema_info),
+            self._prompt_template.format(db_type=self._db_type, db_name=self._db_name, schemas=schema_info),
             None,
         )
 

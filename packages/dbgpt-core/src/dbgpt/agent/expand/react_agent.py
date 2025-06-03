@@ -112,6 +112,11 @@ class ReActAgent(ConversableAgent):
 
         self._init_actions([ReActAction, Terminate])
 
+    async def _init_tool_resources(self, resource: Resource):
+        # 取出数据库、知识库
+        # 取出BaseTool
+        pass
+
     async def _a_init_reply_message(
         self,
         received_message: AgentMessage,
