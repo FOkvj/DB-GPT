@@ -213,6 +213,7 @@ class ToolPack(ResourcePack):
         self,
         *args,
         resource_name: Optional[str] = None,
+        resource: Optional[Resource] = None,
         **kwargs,
     ) -> Any:
         """Execute the tool asynchronously.
@@ -220,6 +221,7 @@ class ToolPack(ResourcePack):
         Args:
             *args: The positional arguments.
             resource_name (str, optional): The tool name to be executed.
+            resource (Resource, optional): The resource to be used for execution.
             **kwargs: The keyword arguments.
 
         Returns:
@@ -230,10 +232,10 @@ class ToolPack(ResourcePack):
             arguments = {k: v for k, v in kwargs.items()}
             arguments = self._get_call_args(arguments, tl)
             if tl.is_async:
-                return await tl.async_execute(**arguments)
+                return await tl.async_execute(**arguments, resource=resource)
             else:
                 # TODO: Execute in a separate executor
-                return tl.execute(**arguments)
+                return tl.execute(**arguments, resource=resource)
         except Exception as e:
             raise ToolExecutionException(f"Execution error: {str(e)}")
 
