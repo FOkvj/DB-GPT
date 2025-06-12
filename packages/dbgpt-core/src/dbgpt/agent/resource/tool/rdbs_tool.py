@@ -14,7 +14,7 @@ class RDBResourceTool(ResourceOptTool):
 
     def _add_resource(self, resource: DatasourceResource):
         """Add a resource to the tool."""
-        self.resources[self._make_key(resource.db_type, resource.connector.get_current_db_name())] = resource
+        self.resources[self._make_key(resource.db_type, resource.db_name)] = resource
     def init_resources(self, resources: List[Resource]):
         """Initialize the RDB resources from the provided list."""
 
@@ -40,7 +40,7 @@ class RDBResourceTool(ResourceOptTool):
             "db_type": ToolParameter(
                 type="string",
                 name="db_type",
-                description="The type of the RDB resource (e.g., MySQL, PostgreSQL, etc.). "
+                description="The type of the RDB resource"
             ),
             "sql": ToolParameter(
                 type="string",
@@ -57,16 +57,17 @@ class RDBResourceTool(ResourceOptTool):
     @property
     def name(self) -> str:
         return "sql_executor"
+    def is_async(self) -> bool:
+        return True
 
-    def execute(self, *args, resource_name: Optional[str] = None, **kwargs) -> Any:
+    async def async_execute(self, *args, resource_name: Optional[str] = None, **kwargs) -> Any:
         """Execute the resource."""
-        self._do_query(**kwargs)
-        raise NotImplementedError
+        return await self._do_query(**kwargs)
 
-    def _do_query(self, db_name: str, sql: str, db_type:str, display_type: Optional[str] = None) -> Any:
+    async def _do_query(self, db_name: str, sql: str, db_type:str, display_type: Optional[str] = None) -> Any:
         """Execute the SQL query on the specified RDB resource."""
-        resource = self.resources.get(self._make_key(db_type, db_name))
-        result = resource.query(sql)
+        resource: DatasourceResource = self.resources.get(self._make_key(db_type, db_name))
+        result = await resource.query(sql)
         return result[:10]
 
 

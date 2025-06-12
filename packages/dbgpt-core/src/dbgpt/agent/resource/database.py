@@ -61,6 +61,13 @@ class DBResource(Resource[P], Generic[P]):
         return self._name
 
     @property
+    def db_name(self) -> str:
+        """Return the resource name."""
+        if not self._db_name:
+            raise ValueError("Database name is not set.")
+        return self._db_name
+
+    @property
     def db_type(self) -> str:
         """Return the resource name."""
         if not self._db_type:
@@ -159,8 +166,8 @@ class RDBMSConnectorResource(DBResource[DBParameters]):
             db_type = connector.db_type
         if not dialect and connector:
             dialect = connector.dialect
-        # if not db_name and connector:
-        db_name = connector.get_current_db_name()
+        if not db_name and connector:
+            db_name = connector.get_current_db_name()
         self._connector = connector
         super().__init__(
             name,
