@@ -148,8 +148,8 @@ class ResourcePack(Resource[PackResourceParameters]):
                     return apply_pack_func(resource)
                 resources = []
                 resource_copy = cast(ResourcePack, copy.copy(resource))
-                for resource_copy in resource_copy.sub_resources:
-                    result = _apply_func_to_resource(resource_copy)
+                for sub_resource in resource_copy.sub_resources:
+                    result = _apply_func_to_resource(sub_resource)
                     if result:
                         if isinstance(result, list):
                             resources.extend(result)

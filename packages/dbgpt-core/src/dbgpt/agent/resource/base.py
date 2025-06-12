@@ -18,7 +18,6 @@ from typing import (
     cast,
 )
 
-from dbgpt.agent import Resource
 from pydantic import field_validator
 
 from dbgpt._private.pydantic import BaseModel, model_to_dict
@@ -223,12 +222,12 @@ class Resource(ABC, Generic[P]):
         """
         return None
 
-    def execute(self, *args, resource_name: Optional[str] = None, resource: Optional[Resource] = None, **kwargs) -> Any:
+    def execute(self, *args, resource_name: Optional[str] = None, **kwargs) -> Any:
         """Execute the resource."""
         raise NotImplementedError
 
     async def async_execute(
-        self, *args, resource_name: Optional[str] = None, resource: Optional[Resource] = None, **kwargs
+        self, *args, resource_name: Optional[str] = None, **kwargs
     ) -> Any:
         """Execute the resource asynchronously."""
         raise NotImplementedError

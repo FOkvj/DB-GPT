@@ -18,6 +18,7 @@ from dbgpt.agent.core.role import AgentRunMode
 from dbgpt.agent.resource import BaseTool, ResourcePack, ToolPack
 from dbgpt.agent.util.react_parser import ReActOutputParser
 from dbgpt.util.configure import DynConfig
+from ..resource.tool.resource_opt_tool import ResourceOptTool
 
 from ...core import ModelMessageRoleType
 from .actions.react_action import ReActAction, Terminate
@@ -38,6 +39,11 @@ You can only use one action in the actions provided in the ACTION SPACE to solve
 task. For each step, you must output an Action; it cannot be empty. The maximum number \
 of steps you can take is {{ max_steps }}.
 Do not output an empty string!
+
+{% if resource_prompt %}\
+Given resources information:
+{{ resource_prompt }} 
+{% endif %}
 
 # ACTION SPACE #
 {{ action_space }}
@@ -134,6 +140,8 @@ class ReActAgent(ConversableAgent):
                 tool_desc, _ = await tool.get_prompt(lang=self.language)
                 action_space_names.append(tool.name)
                 action_space.append(tool_desc)
+                if isinstance(tool, ResourceOptTool):
+                    tool.init_resources(self.resource.sub_resources)
                 if isinstance(tool, BaseTool):
                     tool_simple_desc = tool.description
                 else:

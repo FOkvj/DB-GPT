@@ -1,6 +1,7 @@
 import logging
 from typing import Optional
 
+from dbgpt.agent.resource.tool.rdbs_tool import RDBResourceTool
 from dbgpt.component import SystemApp
 from dbgpt.configs.model_config import MODEL_DISK_CACHE_DIR, resolve_root_path
 from dbgpt.util.executor_utils import DefaultExecutorFactory
@@ -124,6 +125,8 @@ def _initialize_resource_manager(system_app: SystemApp):
     # Register a search tool
     rm.register_resource(resource_instance=baidu_search)
     rm.register_resource(resource_instance=list_dbgpt_support_models)
+    # Register database and knowledge space tools
+    rm.register_resource(resource_instance=RDBResourceTool())
     # Register host tools
     rm.register_resource(resource_instance=get_current_host_cpu_status)
     rm.register_resource(resource_instance=get_current_host_memory_status)
