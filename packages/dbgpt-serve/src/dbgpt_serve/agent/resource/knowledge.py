@@ -1,6 +1,8 @@
 import dataclasses
 import logging
-from typing import Any, List, Optional, Type, cast
+from typing import Any, List, Optional, Type, cast, Tuple, Dict
+
+import cachetools
 
 from dbgpt import SystemApp
 from dbgpt.agent.resource.knowledge import (
@@ -8,6 +10,7 @@ from dbgpt.agent.resource.knowledge import (
     RetrieverResourceParameters,
 )
 from dbgpt.util import ParameterDescription
+from dbgpt.util.cache_utils import cached
 from dbgpt.util.i18n_utils import _
 from dbgpt_serve.rag.retriever.knowledge_space import KnowledgeSpaceRetriever
 
@@ -124,6 +127,87 @@ class KnowledgeSpaceRetrieverResource(RetrieverResource):
             )
 
         return _DynamicKnowledgeSpaceLoadResourceParameters
+
+class KnowledgeSpaceResource(RetrieverResource):
+    """Knowledge Space retriever resource."""
+
+    def __init__(
+        self,
+        name: str,
+        space_name: str,
+        top_k: int = 10,
+        system_app: SystemApp = None,
+    ):
+        # TODO: Build the retriever in a thread pool, it will block the event loop
+        retriever = KnowledgeSpaceRetriever(
+            space_id=space_name,
+            top_k=top_k,
+            system_app=system_app,
+        )
+        super().__init__(name, retriever=retriever)
+
+        knowledge_spaces = get_knowledge_spaces_info(name=space_name)
+        if knowledge_spaces is not None and len(knowledge_spaces) > 0:
+            self._retriever_name = knowledge_spaces[0].name
+            self._retriever_desc = knowledge_spaces[0].desc
+        else:
+            self._retriever_name = None
+            self._retriever_desc = None
+
+    @property
+    def retriever_name(self) -> str:
+        """Return the resource name."""
+        return self._retriever_name
+
+    @property
+    def retriever_desc(self) -> str:
+        """Return the retriever desc."""
+        return self._retriever_desc
+
+    @classmethod
+    def resource_parameters_class(
+        cls, **kwargs
+    ) -> Type[KnowledgeSpaceLoadResourceParameters]:
+        from dbgpt_app.knowledge.request.request import KnowledgeSpaceRequest
+        from dbgpt_app.knowledge.service import KnowledgeService
+
+        knowledge_space_service = KnowledgeService()
+        knowledge_spaces = knowledge_space_service.get_knowledge_space(
+            KnowledgeSpaceRequest(**kwargs)
+        )
+        results = [
+            {"label": ks.name, "key": ks.name, "description": ks.desc}
+            for ks in knowledge_spaces
+        ]
+
+        @dataclasses.dataclass
+        class _DynamicKnowledgeSpaceLoadResourceParameters(
+            KnowledgeSpaceLoadResourceParameters
+        ):
+            space_name: str = dataclasses.field(
+                default=None,
+                metadata={
+                    "help": _("Knowledge space name"),
+                    "valid_values": results,
+                },
+            )
+
+        return _DynamicKnowledgeSpaceLoadResourceParameters
+
+    @cached(cachetools.TTLCache(maxsize=100, ttl=10))
+    async def get_prompt(
+            self,
+            *,
+            lang: str = "en",
+            prompt_type: str = "default",
+            question: Optional[str] = None,
+            resource_name: Optional[str] = None,
+            **kwargs,
+    ) -> Tuple[str, Optional[Dict]]:
+        """Get the prompt for the resource."""
+        if not question:
+            raise ValueError("Question is required for knowledge resource.")
+        return f"Resource name: {self.name}\nResource description: {self.retriever_desc}\nRetriever name: {self.retriever_name}", None
 
 
 def get_knowledge_spaces_info(**kwargs):

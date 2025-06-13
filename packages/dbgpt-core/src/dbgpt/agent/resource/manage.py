@@ -282,7 +282,9 @@ class ResourceManager(BaseComponent):
         if not agent_resources:
             return None
         dependencies: List[Resource] = []
+        self._handle_knowledge_retriever(agent_resources)
         for resource in agent_resources:
+            # remove
             resource_inst = cast(
                 Resource, self.build_resource_by_type(resource.type, resource)
             )
@@ -291,6 +293,19 @@ class ResourceManager(BaseComponent):
             return dependencies[0]
         else:
             return ResourcePack(dependencies)
+    def _handle_knowledge_retriever(self, agent_resources):
+        """Check if knowledge retriever resource exists."""
+        # if the tool knowledge_retriever exists, change knowledge type
+        retriever_exists = False
+        for resource in agent_resources:
+            if resource.type == "tool" and json.loads(resource.value).get("name") == "knowledge_retriever":
+                retriever_exists = True
+                break
+        if retriever_exists:
+            # Change the resource type to knowledge_retriever
+            for resource in agent_resources:
+                if resource.type == "knowledge":
+                    resource.type = "knowledge_retriever"
 
 
 _SYSTEM_APP: Optional[SystemApp] = None

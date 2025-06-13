@@ -1,11 +1,13 @@
 import logging
 from typing import Optional
 
+from dbgpt.agent.resource.tool.knowledge_tool import KnowledgeResourceTool
 from dbgpt.agent.resource.tool.rdbs_tool import RDBResourceTool
 from dbgpt.component import SystemApp
 from dbgpt.configs.model_config import MODEL_DISK_CACHE_DIR, resolve_root_path
 from dbgpt.util.executor_utils import DefaultExecutorFactory
 from dbgpt_app.config import ApplicationConfig, ServiceWebParameters
+from dbgpt_serve.agent.resource.knowledge import KnowledgeSpaceResource
 from dbgpt_serve.rag.storage_manager import StorageManager
 
 logger = logging.getLogger(__name__)
@@ -119,6 +121,7 @@ def _initialize_resource_manager(system_app: SystemApp):
     rm = get_resource_manager(system_app)
     rm.register_resource(DatasourceResource)
     rm.register_resource(KnowledgeSpaceRetrieverResource)
+    rm.register_resource(resource_cls=KnowledgeSpaceResource, resource_type_alias="knowledge_retriever")
     rm.register_resource(PluginToolPack, resource_type=ResourceType.Tool)
     rm.register_resource(GptAppResource)
     rm.register_resource(resource_instance=Terminate())
@@ -127,6 +130,7 @@ def _initialize_resource_manager(system_app: SystemApp):
     rm.register_resource(resource_instance=list_dbgpt_support_models)
     # Register database and knowledge space tools
     rm.register_resource(resource_instance=RDBResourceTool())
+    rm.register_resource(resource_instance=KnowledgeResourceTool())
     # Register host tools
     rm.register_resource(resource_instance=get_current_host_cpu_status)
     rm.register_resource(resource_instance=get_current_host_memory_status)
