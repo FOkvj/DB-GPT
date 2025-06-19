@@ -102,6 +102,12 @@ class ComponentType(str, Enum):
     VARIABLES_PROVIDER = "dbgpt_variables_provider"
     FILE_STORAGE_CLIENT = "dbgpt_file_storage_client"
 
+    # expend
+    FILE_SCANNER = "file_scanner"
+    SCHEDULE_MANAGER = "schedule_manager"
+    PIPELINE_MANAGER = "pipeline_manager"
+    SPEECH_TO_TEXT = "speech_to_text"
+
 
 _EMPTY_DEFAULT_COMPONENT = "_EMPTY_DEFAULT_COMPONENT"
 
