@@ -11,11 +11,13 @@ from typing import List, Optional
 # 初始化FunASR转写器
 from fastapi import APIRouter
 from fastapi import Query, Form, File, UploadFile, BackgroundTasks
+from fastapi.params import Depends
 from fastapi.responses import FileResponse
 from sqlalchemy import inspect
 
 from dbgpt.core.interface.file import FileStorageClient
 from dbgpt.util.executor_utils import blocking_func_to_async
+from dbgpt_app.expend.dependencies import get_speech2text_service
 from dbgpt_app.expend.excel2db import ExtendedMySQLConnector, ExcelToMysql
 from dbgpt_app.knowledge.api import get_fs
 from dbgpt_app.openapi.api_view_model import (
@@ -37,7 +39,7 @@ from voice2text.tran.funasr_transcriber import FunASRTranscriber
 #     spk_model="cam++",
 #     spk_model_revision="v2.0.2"
 # )
-transcriber = None
+# transcriber = None
 router = APIRouter()
 logger = logging.getLogger(__name__)
 @router.post("/v1/expand/dataprocess/excel2db")
@@ -243,7 +245,7 @@ async def excel2db(
 
 
 # 语音转文字API
-from voice2text.server import parse_filename
+from voice2text.tran.server import parse_filename
 
 
 # 语音转文字API
@@ -259,7 +261,8 @@ async def voice2text(
         auto_register: Optional[bool] = Query(True, description="是否将未知声音自动注册为声纹"),
         threshold: Optional[float] = Query(0.5, description="声纹匹配阈值"),
         hotword: Optional[str] = Query("", description="热词"),
-        background_tasks: BackgroundTasks = BackgroundTasks()
+        background_tasks: BackgroundTasks = BackgroundTasks(),
+        transcriber = Depends(get_speech2text_service)
 ):
     """
     语音转文字处理API
@@ -417,7 +420,7 @@ async def voice2text(
 
 # 获取声纹样本文件 - 新API
 @router.get("/v1/expand/voiceprofile/sample/{sample_id}")
-async def get_voice_sample(sample_id: str):
+async def get_voice_sample(sample_id: str, transcriber: FunASRTranscriber = Depends(get_speech2text_service)):
     """
     获取声纹样本文件
     """
@@ -437,7 +440,7 @@ async def get_voice_sample(sample_id: str):
 
 # 获取所有声纹档案
 @router.get("/v1/expand/voiceprofile/list")
-async def list_voice_profiles(include_unnamed: bool = Query(True, description="是否包含未命名声纹")):
+async def list_voice_profiles(include_unnamed: bool = Query(True, description="是否包含未命名声纹"), transcriber: FunASRTranscriber = Depends(get_speech2text_service)):
     """
     获取所有声纹档案
     """
@@ -503,7 +506,8 @@ async def list_voice_profiles(include_unnamed: bool = Query(True, description="�
 @router.post("/v1/expand/voiceprofile/create")
 async def create_voice_profile(
         name: str = Form(..., description="声纹名称"),
-        file: Optional[UploadFile] = File(None, description="音频文件（可选）")
+        file: Optional[UploadFile] = File(None, description="音频文件（可选）"),
+        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
 ):
     """
     创建新声纹档案
@@ -583,7 +587,8 @@ async def create_voice_profile(
 @router.post("/v1/expand/voiceprofile/update")
 async def update_voice_profile(
         id: str = Form(..., description="声纹ID"),
-        name: str = Form(..., description="新声纹名称")
+        name: str = Form(..., description="新声纹名称"),
+        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
 ):
     """
     更新声纹档案名称
@@ -640,7 +645,7 @@ async def update_voice_profile(
 
 # 删除声纹档案
 @router.post("/v1/expand/voiceprofile/delete")
-async def delete_voice_profile(id: str = Form(..., description="声纹ID")):
+async def delete_voice_profile(id: str = Form(..., description="声纹ID"), transcriber: FunASRTranscriber = Depends(get_speech2text_service)):
     """
     删除声纹档案
     """
@@ -676,7 +681,8 @@ async def delete_voice_profile(id: str = Form(..., description="声纹ID")):
 @router.post("/v1/expand/voiceprofile/addsample")
 async def add_voice_sample(
         profileId: str = Form(..., description="声纹ID"),
-        file: UploadFile = File(..., description="音频文件")
+        file: UploadFile = File(..., description="音频文件"),
+        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
 ):
     """
     添加声纹样本
@@ -740,7 +746,8 @@ async def add_voice_sample(
 # 删除声纹样本
 @router.post("/v1/expand/voiceprofile/deletesample")
 async def delete_voice_sample(
-        sampleId: str = Form(..., description="样本ID")
+        sampleId: str = Form(..., description="样本ID"),
+        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
 ):
     """
     删除声纹样本
@@ -764,7 +771,7 @@ async def delete_voice_sample(
 
 # 清空所有声纹
 @router.post("/v1/expand/voiceprofile/clear")
-async def clear_voice_profiles():
+async def clear_voice_profiles(transcriber: FunASRTranscriber = Depends(get_speech2text_service)):
     """
     清空所有声纹数据
     """
@@ -785,7 +792,8 @@ async def clear_voice_profiles():
 # 批量注册声纹
 @router.post("/v1/expand/voiceprofile/batchregister")
 async def batch_register_voice_profiles(
-        directory: str = Form(..., description="包含音频文件的目录路径")
+        directory: str = Form(..., description="包含音频文件的目录路径"),
+        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
 ):
     """
     从目录批量注册声纹
