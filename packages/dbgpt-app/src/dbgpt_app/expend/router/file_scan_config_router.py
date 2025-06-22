@@ -9,7 +9,7 @@ from dbgpt_app.expend.model.file_scan import (
     GlobalSettingModel, ScanResult, StatisticsResponse,
     ProcessedFileResponse
 )
-from dbgpt_app.expend.service.file_scanner import FileScanner
+from dbgpt_app.expend.service.file_scanner_v2 import FileScanner
 
 router = APIRouter()
 
@@ -180,16 +180,16 @@ async def test_scan_configs(scanner: FileScanner = Depends(get_scanner)):
 
         for config in configs:
             test_result = {
-                "name": config["name"],
-                "type": config["type"],
+                "name": config.name,
+                "type": config.type,
                 "status": "success",
                 "message": ""
             }
 
             try:
-                if config["type"] == "local":
+                if config.type == "local":
                     import os
-                    path = config["config"]["path"]
+                    path = config.config["path"]
                     if not os.path.exists(path):
                         test_result["status"] = "error"
                         test_result["message"] = f"目录不存在: {path}"
@@ -199,9 +199,9 @@ async def test_scan_configs(scanner: FileScanner = Depends(get_scanner)):
                     else:
                         test_result["message"] = "目录访问正常"
 
-                elif config["type"] == "ftp":
+                elif config.type == "ftp":
                     from ftplib import FTP
-                    ftp_config = config["config"]
+                    ftp_config = config.config
                     try:
                         ftp = FTP()
                         ftp.connect(ftp_config["host"], ftp_config.get("port", 21))
@@ -256,3 +256,70 @@ async def clear_processed_files(scanner: FileScanner = Depends(get_scanner)):
             return Result.failed("清空失败", "E0052")
     except Exception as e:
         return Result.failed(f"清空已处理文件记录失败: {str(e)}", "E0053")
+
+
+@router.post("/test-ftp", summary="测试FTP服务器连接", response_model=Result[Dict[str, Any]])
+async def test_ftp_connection(
+        ftp_config: FTPServerConfig,
+        scanner: FileScanner = Depends(get_scanner)
+):
+    """测试FTP服务器连接并返回根目录文件列表"""
+    try:
+        from ftplib import FTP, error_perm
+        import socket
+
+        result = {
+            "host": ftp_config.host,
+            "port": ftp_config.port,
+            "username": ftp_config.username,
+            "connected": False,
+            "error": None,
+            "root_files": [],
+            "remote_dir_status": None
+        }
+
+        try:
+            ftp = FTP()
+            # 设置超时为10秒
+            ftp.timeout = 10
+
+            # 尝试连接
+            ftp.connect(ftp_config.host, ftp_config.port)
+            result["connected"] = True
+
+            # 尝试登录
+            try:
+                ftp.login(ftp_config.username, ftp_config.password)
+
+                # 获取根目录文件列表
+                try:
+                    root_files = []
+                    ftp.retrlines('LIST', root_files.append)
+                    result["root_files"] = root_files[:20]  # 限制返回前20个文件
+                except error_perm as e:
+                    result["root_files"] = f"无法列出文件: {str(e)}"
+
+                # 测试远程目录（如果配置了）
+                if ftp_config.remote_dir:
+                    try:
+                        ftp.cwd(ftp_config.remote_dir)
+                        result["remote_dir_status"] = f"成功切换到目录: {ftp_config.remote_dir}"
+                    except error_perm as e:
+                        result["remote_dir_status"] = f"无法切换到目录 {ftp_config.remote_dir}: {str(e)}"
+
+            except error_perm as e:
+                result["error"] = f"登录失败: {str(e)}"
+
+            ftp.quit()
+
+        except socket.timeout:
+            result["error"] = "连接超时"
+        except socket.gaierror:
+            result["error"] = "无法解析主机名"
+        except Exception as e:
+            result["error"] = str(e)
+
+        return Result.succ(result)
+
+    except Exception as e:
+        return Result.failed(f"测试FTP连接时发生错误: {str(e)}", "E0060")

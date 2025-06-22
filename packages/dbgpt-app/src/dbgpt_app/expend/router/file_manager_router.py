@@ -26,7 +26,7 @@ async def get_files(manager: PipelineWebManager = Depends(get_pipeline_manager))
     except Exception as e:
         return Result.failed(str(e), "E500")
 
-@router.delete("/files")
+@router.post("/files")
 async def delete_files(
     request: DeleteFilesRequest,
     manager: PipelineWebManager = Depends(get_pipeline_manager)

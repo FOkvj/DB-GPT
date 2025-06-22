@@ -301,7 +301,7 @@ function SideBar() {
           <Image
             key='image_dataprocess'
             src={
-              pathname.startsWith('/dataprocess') ? '/pictures/data_process_active.png' : '/pictures/data_process.png'
+              pathname.startsWith('/dataprocess') ? '/pictures/dataprocess_active.png' : '/pictures/dataprocess.png'
             }
             alt='dataprocess_image'
             width={40}

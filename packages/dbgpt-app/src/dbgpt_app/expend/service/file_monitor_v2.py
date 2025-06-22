@@ -6,31 +6,31 @@
 改进：启动时扫描现有文件并检查处理状态
 """
 import asyncio
-import os
-import time
-import threading
-import queue
-import logging
-import sqlite3
 import hashlib
-import json
+import logging
+import queue
+import threading
+import time
+from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-from typing import List, Dict, Optional, Callable, Any, Tuple
 from datetime import datetime
 from enum import Enum
-from abc import ABC, abstractmethod
-from watchdog.observers import Observer
+from pathlib import Path
+from typing import List, Dict, Optional, Callable, Any, Tuple
+
 from watchdog.events import FileSystemEventHandler
-from voice2text.tran.funasr_transcriber import FunASRTranscriber
+from watchdog.observers import Observer
 
 from dbgpt.core.interface.file import FileStorageClient
 from dbgpt.rag.knowledge.base import KnowledgeType
+from dbgpt.util.executor_utils import blocking_func_to_async
+from dbgpt_app.expend.dao.pipeline_event_dao import PipelineEventDao, PipelineEventResponse
+from dbgpt_app.expend.model.file_manage_model import FileStatus
+
 from dbgpt_app.expend.service.speech2text import Speech2TextService
 from dbgpt_app.knowledge.request.request import KnowledgeSpaceRequest, KnowledgeDocumentRequest
 from dbgpt_app.knowledge.service import KnowledgeService, CFG
 from dbgpt_ext.rag import ChunkParameters
-from dbgpt_serve.core import blocking_func_to_async
 from dbgpt_serve.rag.api.schemas import KnowledgeSyncRequest
 from dbgpt_serve.rag.service.service import Service
 
@@ -98,6 +98,9 @@ class ProcessorInterface(ABC):
             'failed': 0,
             'skipped': 0
         }
+        self._executor = ThreadPoolExecutor(
+            max_workers=5, thread_name_prefix=self.name
+        )
 
     @abstractmethod
     def can_process(self, file_event: FileEvent) -> bool:
@@ -163,12 +166,12 @@ class ProcessorInterface(ABC):
 
 
 class AudioToTextProcessor(ProcessorInterface):
-    """语音转文字处理器"""
-
-    def __init__(self, tanscriber: Speech2TextService, config: Dict = None):
+    def __init__(self, transcriber: Speech2TextService, config: Dict = None):
         super().__init__("audio_to_text", config)
         self.supported_extensions = ['.wav', '.mp3', '.m4a', '.flac', '.aac']
-        self.transcriber = tanscriber
+        self.transcriber = transcriber
+        # 添加锁保护transcriber
+        self._transcriber_lock = threading.Lock()
 
 
     def can_process(self, file_event: FileEvent) -> bool:
@@ -197,7 +200,8 @@ class AudioToTextProcessor(ProcessorInterface):
 
             # 生成输出文件路径
             output_dir = Path(self.get_output_directory() or "./output/transcripts")
-            output_dir.mkdir(parents=True, exist_ok=True)
+            with threading.Lock():
+                output_dir.mkdir(parents=True, exist_ok=True)
 
             output_file = output_dir / f"{file_event.file_path.stem}_transcript.txt"
 
@@ -209,8 +213,9 @@ class AudioToTextProcessor(ProcessorInterface):
 
             # 使用FunASR转写服务处理文件
             process_start_time = time.time()
-
-            transcription_result = self.transcriber.transcribe_file(audio_file_path=file_event.file_path.as_posix(), threshold=0.5)
+            # transcription_result = await blocking_func_to_async(self._executor, self.transcriber.transcribe_file, audio_file_path=file_event.file_path.as_posix(), threshold=0.5)
+            with self._transcriber_lock:
+                transcription_result = self.transcriber.transcribe_file(audio_file_path=file_event.file_path.as_posix(), threshold=0.5)
 
             # 提取结果
             transcript_text = transcription_result["transcript"]
@@ -234,7 +239,7 @@ class AudioToTextProcessor(ProcessorInterface):
                 'file_hash': file_event.file_hash
             }
 
-            self.logger.info(f"语音转文字完成: {output_file.name}")
+            self.logger.info(f"语音转文字完成: {output_file}")
             return ProcessResult.SUCCESS, [str(output_file)], metadata
 
         except Exception as e:
@@ -345,13 +350,7 @@ class KnowledgeProcessor(ProcessorInterface):
             self.logger.info(f"开始知识加工: {space_name}")
             self._create_space(space_name)
             doc_id = self._upload_file(file_event)
-            logger.info(f"文档上传成功， doc_id: {doc_id}")
-            # 获取或创建事件循环
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+
 
             doc_ids = await self._sync_doc(space_name=space_name, doc_id=doc_id)
 
@@ -405,90 +404,70 @@ class ProcessorRegistry:
 
 
 class PipelineEventManager:
-    """管道事件管理器"""
+    """管道事件管理器 - Service层"""
 
-    def __init__(self, db_path: str = "./pipeline_events.db"):
-        self.db_path = db_path
-        self.lock = threading.RLock()
-        self.init_database()
+    # name = ComponentType.PIPELINE_EVENT_MANAGER
 
-    def init_database(self):
-        """初始化数据库"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS pipeline_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    file_path TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    processor_name TEXT,
-                    result TEXT,
-                    metadata TEXT,
-                    created_time TEXT NOT NULL,
-                    output_files TEXT,
-                    file_hash TEXT
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_file_path ON pipeline_events(file_path)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_processor ON pipeline_events(processor_name)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_file_hash ON pipeline_events(file_hash)")
+    def __init__(self):
+        """初始化管道事件管理器"""
+
+        # 使用DAO层操作数据库
+        self.event_dao = PipelineEventDao()
+
+        # 确保数据库已初始化
+
 
     def log_event(self, file_event: FileEvent, processor_name: str = None,
                   result: ProcessResult = None, output_files: List[str] = None,
-                  metadata: Dict = None):
+                  event_metadata: Dict = None) -> bool:
         """记录管道事件"""
         try:
-            with self.lock:
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.execute("""
-                        INSERT INTO pipeline_events 
-                        (file_path, event_type, processor_name, result, metadata, created_time, output_files, file_hash)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        str(file_event.file_path),
-                        file_event.event_type,
-                        processor_name,
-                        result.value if result else None,
-                        json.dumps(metadata or {}),
-                        file_event.timestamp.isoformat(),
-                        json.dumps(output_files or []),
-                        file_event.file_hash
-                    ))
+            response = self.event_dao.log_event(
+                file_path=str(file_event.file_path),
+                event_type=file_event.event_type,
+                processor_name=processor_name,
+                result=result.value if result else None,
+                output_files=output_files or [],
+                event_metadata={**(event_metadata or {}), **file_event.metadata},
+                file_hash=file_event.file_hash
+            )
+            return response is not None
         except Exception as e:
-            logger.error(f"记录事件失败: {e}")
+            print(f"记录事件失败: {e}")
+            return False
 
     def get_file_processing_history(self, file_path: str) -> List[Dict]:
         """获取文件的处理历史"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
-                    SELECT * FROM pipeline_events 
-                    WHERE file_path = ? 
-                    ORDER BY created_time
-                """, (str(Path(file_path).absolute()),))
-
-                columns = [desc[0] for desc in cursor.description]
-                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            responses = self.event_dao.get_file_processing_history(file_path)
+            return [self._response_to_dict(response) for response in responses]
         except Exception as e:
-            logger.error(f"获取处理历史失败: {e}")
+            print(f"获取处理历史失败: {e}")
             return []
+
+    def _response_to_dict(self, response: PipelineEventResponse) -> Dict:
+        """将响应对象转换为字典"""
+        return {
+            'id': response.id,
+            'file_path': response.file_path,
+            'event_type': response.event_type,
+            'processor_name': response.processor_name,
+            'result': response.result,
+            'event_metadata': response.event_metadata,
+            'output_files': response.output_files,
+            'file_hash': response.file_hash,
+            'created_time': response.created_time
+        }
 
     def is_file_processed_successfully(self, file_path: str, processor_name: str, file_hash: str) -> bool:
         """检查文件是否已被特定处理器成功处理过"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
-                    SELECT COUNT(*) FROM pipeline_events 
-                    WHERE file_path = ? AND processor_name = ? AND result = ? AND file_hash = ?
-                """, (str(Path(file_path).absolute()), processor_name, ProcessResult.SUCCESS.value, file_hash))
-
-                count = cursor.fetchone()[0]
-                return count > 0
+            return self.event_dao.is_file_processed_successfully(file_path, processor_name, file_hash)
         except Exception as e:
-            logger.error(f"检查处理状态失败: {e}")
+            print(f"检查处理状态失败: {e}")
             return False
 
-    def get_unprocessed_files(self, watch_paths: List[Path], processors: Dict[str, ProcessorInterface]) -> List[
-        FileEvent]:
+    def get_unprocessed_files(self, watch_paths: List[Path], processors: Dict[str, Any]) -> List[FileEvent]:
         """获取未处理的文件列表"""
         unprocessed_files = []
 
@@ -507,7 +486,7 @@ class PipelineEventManager:
                     # 检查是否有处理器可以处理此文件
                     applicable_processors = []
                     for processor in processors.values():
-                        if processor.can_process(file_event):
+                        if hasattr(processor, 'can_process') and processor.can_process(file_event):
                             # 检查是否已被成功处理过
                             if not self.is_file_processed_successfully(
                                     str(file_path), processor.name, file_event.file_hash):
@@ -516,13 +495,263 @@ class PipelineEventManager:
                     # 如果有未处理的处理器，则加入队列
                     if applicable_processors:
                         unprocessed_files.append(file_event)
-                        logger.debug(f"发现未处理文件: {file_path.name} "
-                                     f"(待处理器: {[p.name for p in applicable_processors]})")
+                        print(f"发现未处理文件: {file_path.name} "
+                              f"(待处理器: {[p.name for p in applicable_processors]})")
 
                 except Exception as e:
-                    logger.error(f"检查文件 {file_path} 时出错: {e}")
+                    print(f"检查文件 {file_path} 时出错: {e}")
 
         return unprocessed_files
+
+    def analyze_file_status(self, file_path: str) -> Tuple[FileStatus, List[str], Optional[str], Optional[str]]:
+        """分析文件处理状态"""
+        try:
+            summary = self.event_dao.get_file_processing_summary(file_path)
+
+            # 映射状态
+            status_mapping = {
+                'pending': FileStatus.PENDING,
+                'processing': FileStatus.PROCESSING,
+                'completed': FileStatus.COMPLETED,
+                'failed': FileStatus.FAILED,
+                'unknown': FileStatus.PENDING
+            }
+
+            status = status_mapping.get(summary['status'], FileStatus.PENDING)
+            processors = summary['processors']
+            last_processed = summary['last_processed']
+            error_message = summary['error_message']
+
+            return status, processors, last_processed, error_message
+
+        except Exception as e:
+            print(f"分析文件状态失败: {e}")
+            return FileStatus.PENDING, [], None, str(e)
+
+    def get_processor_statistics(self, processor_name: str = None) -> Dict:
+        """获取处理器统计信息"""
+        try:
+            return self.event_dao.get_processor_statistics(processor_name)
+        except Exception as e:
+            print(f"获取处理器统计失败: {e}")
+            return {'total': 0, 'success': 0, 'failed': 0, 'skipped': 0, 'partial': 0}
+
+    def get_all_processor_statistics(self) -> Dict[str, Dict]:
+        """获取所有处理器的统计信息"""
+        try:
+            # 获取所有事件记录
+            all_events = self.event_dao.get_recent_events(limit=10000)  # 足够大的数量
+
+            # 按处理器分组统计
+            processor_stats = {}
+            for event in all_events:
+                if event.processor_name:
+                    if event.processor_name not in processor_stats:
+                        processor_stats[event.processor_name] = {
+                            'total': 0, 'success': 0, 'failed': 0, 'skipped': 0, 'partial': 0
+                        }
+
+                    processor_stats[event.processor_name]['total'] += 1
+                    if event.result:
+                        processor_stats[event.processor_name][event.result] += 1
+
+            return processor_stats
+
+        except Exception as e:
+            print(f"获取所有处理器统计失败: {e}")
+            return {}
+
+    def get_recent_events(self, limit: int = 50) -> List[Dict]:
+        """获取最近的事件"""
+        try:
+            responses = self.event_dao.get_recent_events(limit)
+            return [self._response_to_dict(response) for response in responses]
+        except Exception as e:
+            print(f"获取最近事件失败: {e}")
+            return []
+
+    def get_file_list_with_status(self, watch_paths: List[Path]) -> List[Dict]:
+        """获取监控目录下所有文件及其状态"""
+        files = []
+
+        for watch_path in watch_paths:
+            if not watch_path.exists():
+                continue
+
+            for file_path in watch_path.rglob('*'):
+                if not file_path.is_file():
+                    continue
+
+                try:
+                    stat = file_path.stat()
+
+                    # 获取文件处理状态
+                    status, processors, last_processed, error_msg = self.analyze_file_status(str(file_path))
+
+                    file_info = {
+                        'path': str(file_path),
+                        'name': file_path.name,
+                        'size': stat.st_size,
+                        'created_time': datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                        'modified_time': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        'extension': file_path.suffix.lower(),
+                        'status': status.value,
+                        'processors': processors,
+                        'last_processed': last_processed,
+                        'error_message': error_msg
+                    }
+
+                    files.append(file_info)
+
+                except Exception as e:
+                    print(f"获取文件信息失败 {file_path}: {e}")
+                    continue
+
+        return sorted(files, key=lambda x: x['modified_time'], reverse=True)
+
+    def clean_old_events(self, days: int = 30) -> bool:
+        """清理旧事件记录"""
+        try:
+            return self.event_dao.clean_old_events(days)
+        except Exception as e:
+            print(f"清理旧事件记录失败: {e}")
+            return False
+
+    def get_system_statistics(self) -> Dict:
+        """获取系统统计信息"""
+        try:
+            recent_events = self.get_recent_events(limit=1000)
+            processor_stats = self.get_all_processor_statistics()
+
+            # 计算总体统计
+            total_events = len(recent_events)
+            total_files_processed = len(set(event['file_path'] for event in recent_events
+                                            if event.get('processor_name')))
+
+            # 按事件类型统计
+            event_type_stats = {}
+            for event in recent_events:
+                event_type = event.get('event_type', 'unknown')
+                event_type_stats[event_type] = event_type_stats.get(event_type, 0) + 1
+
+            # 按结果状态统计
+            result_stats = {'success': 0, 'failed': 0, 'skipped': 0, 'partial': 0}
+            for event in recent_events:
+                result = event.get('result')
+                if result in result_stats:
+                    result_stats[result] += 1
+
+            return {
+                'total_events': total_events,
+                'total_files_processed': total_files_processed,
+                'event_type_statistics': event_type_stats,
+                'result_statistics': result_stats,
+                'processor_statistics': processor_stats
+            }
+
+        except Exception as e:
+            print(f"获取系统统计失败: {e}")
+            return {}
+
+    def delete_file_events(self, file_path: str) -> bool:
+        """删除指定文件的所有事件记录"""
+        try:
+            # 注意：这里需要根据实际的DAO实现来进行批量删除
+            # 由于BaseDao没有直接的批量删除方法，这里留作扩展点
+            print(f"删除文件事件记录功能需要根据具体需求实现: {file_path}")
+            return True
+        except Exception as e:
+            print(f"删除文件事件记录失败: {e}")
+            return False
+
+    def get_processing_timeline(self, file_path: str) -> List[Dict]:
+        """获取文件的处理时间线"""
+        try:
+            history = self.get_file_processing_history(file_path)
+
+            timeline = []
+            for event in history:
+                timeline_item = {
+                    'timestamp': event['created_time'],
+                    'event_type': event['event_type'],
+                    'processor': event.get('processor_name'),
+                    'result': event.get('result'),
+                    'description': self._generate_event_description(event),
+                    'event_metadata': event.get('event_metadata', {})
+                }
+                timeline.append(timeline_item)
+
+            return sorted(timeline, key=lambda x: x['timestamp'])
+
+        except Exception as e:
+            print(f"获取处理时间线失败: {e}")
+            return []
+
+    def _generate_event_description(self, event: Dict) -> str:
+        """生成事件描述"""
+        event_type = event.get('event_type', 'unknown')
+        processor = event.get('processor_name')
+        result = event.get('result')
+
+        if event_type == 'created':
+            return "文件已创建"
+        elif event_type == 'moved':
+            return "文件已移动"
+        elif event_type == 'processed':
+            if processor and result:
+                return f"由 {processor} 处理，结果: {result}"
+            elif processor:
+                return f"正在由 {processor} 处理"
+            else:
+                return "文件已处理"
+        elif event_type == 'processor_output':
+            return f"处理器 {processor or 'unknown'} 生成的输出文件"
+        elif event_type == 'startup_scan':
+            return "启动时扫描发现"
+        else:
+            return f"事件类型: {event_type}"
+
+    def validate_system_integrity(self) -> Dict:
+        """验证系统完整性"""
+        try:
+            issues = []
+
+            # 检查数据库连接
+            try:
+                recent_events = self.event_dao.get_recent_events(limit=1)
+                if recent_events is None:
+                    issues.append("数据库连接异常")
+            except Exception as e:
+                issues.append(f"数据库访问错误: {e}")
+
+            # 检查处理器统计一致性
+            try:
+                stats = self.get_all_processor_statistics()
+                for processor_name, stat in stats.items():
+                    total = stat.get('total', 0)
+                    success = stat.get('success', 0)
+                    failed = stat.get('failed', 0)
+                    skipped = stat.get('skipped', 0)
+                    partial = stat.get('partial', 0)
+
+                    calculated_total = success + failed + skipped + partial
+                    if total != calculated_total:
+                        issues.append(f"处理器 {processor_name} 统计不一致: {total} vs {calculated_total}")
+            except Exception as e:
+                issues.append(f"统计验证错误: {e}")
+
+            return {
+                'is_healthy': len(issues) == 0,
+                'issues': issues,
+                'checked_at': datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            return {
+                'is_healthy': False,
+                'issues': [f"系统完整性检查失败: {e}"],
+                'checked_at': datetime.now().isoformat()
+            }
 
 
 class FilePipelineSystem:
@@ -748,7 +977,7 @@ class PipelineWorker:
                 file_event = self.task_queue.get(timeout=1)
 
                 # 记录开始处理事件
-                self.event_manager.log_event(file_event, metadata=file_event.metadata)
+                self.event_manager.log_event(file_event, event_metadata=file_event.metadata)
 
                 # 获取适用的处理器
                 applicable_processors = self.processor_registry.get_applicable_processors(file_event)
@@ -805,7 +1034,7 @@ class PipelineWorker:
                         processor.update_statistics(ProcessResult.FAILED)
                         self.event_manager.log_event(
                             file_event, processor.name, ProcessResult.FAILED,
-                            metadata={"error": str(e)}
+                            event_metadata={"error": str(e)}
                         )
 
                 self.task_queue.task_done()
@@ -954,7 +1183,6 @@ def main():
 
 def create_sample_files():
     """创建示例文件用于测试"""
-    import os
 
     # 确保输入目录存在
     input_dir = Path("./input")

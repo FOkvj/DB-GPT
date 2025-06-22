@@ -1,4 +1,5 @@
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -10,13 +11,13 @@ from pydantic import BaseModel
 from dbgpt import BaseComponent
 from dbgpt._private.config import Config
 from dbgpt.component import ComponentType, SystemApp
-from dbgpt_app.expend.service.file_monitor import PipelineEventManager, ProcessResult, FilePipelineSystem
+from dbgpt_app.expend.service.file_monitor_v2 import PipelineEventManager, ProcessResult, FilePipelineSystem
 from dbgpt_app.expend.service.speech2text import Speech2TextService
 
 # 导入现有的管道系统组件
 
 CFG = Config()
-
+logger = logging.getLogger(__name__)
 class FileStatus(Enum):
     """文件状态枚举"""
     PENDING = "pending"  # 待处理
@@ -164,7 +165,7 @@ class PipelineController:
         self.init()
 
     def init(self):
-        from dbgpt_app.expend.service.file_monitor import AudioToTextProcessor, KnowledgeProcessor
+        from dbgpt_app.expend.service.file_monitor_v2 import AudioToTextProcessor, KnowledgeProcessor
 
         # 创建管道系统
         self.pipeline = FilePipelineSystem(self.watch_paths, self.config)
@@ -193,8 +194,8 @@ class PipelineController:
             self.is_running = True
             return True
 
-        except Exception:
-            self.pipeline = None
+        except Exception as e:
+            logger.error(f"启动管道系统失败: {e}")
             return False
 
     def stop_pipeline(self) -> bool:
@@ -204,10 +205,10 @@ class PipelineController:
 
         try:
             self.pipeline.stop()
-            self.pipeline = None
             self.is_running = False
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"停止管道系统失败: {e}")
             return False
 
     def get_status(self) -> Dict:

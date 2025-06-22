@@ -234,11 +234,11 @@ const ExcelModule: React.FC = () => {
   };
 
   // Table columns for Excel mapping preview
-  const mappingColumns = [
-    { title: '列名', dataIndex: 'column', key: 'column' },
-    { title: '数据类型', dataIndex: 'type', key: 'type' },
-    { title: '映射字段', dataIndex: 'mapped', key: 'mapped' },
-  ];
+  // const mappingColumns = [
+  //   { title: '列名', dataIndex: 'column', key: 'column' },
+  //   { title: '数据类型', dataIndex: 'type', key: 'type' },
+  //   { title: '映射字段', dataIndex: 'mapped', key: 'mapped' },
+  // ];
 
   // Table columns for Excel files
   const excelFilesColumns = [

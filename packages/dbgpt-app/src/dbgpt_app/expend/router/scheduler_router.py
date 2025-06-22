@@ -1,9 +1,9 @@
 from flask import request, jsonify
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 
 from dbgpt.core.schema.api import Result
 from dbgpt_app.expend.dependencies import get_scheduler_manager
-from dbgpt_app.expend.service.scheduler_manager import SchedulerManager
+from dbgpt_app.expend.service.scheduler_manager_v2 import SchedulerManager
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ def get_tasks(scheduler_manager: SchedulerManager = Depends(get_scheduler_manage
 def get_task(task_id: str, scheduler_manager: SchedulerManager = Depends(get_scheduler_manager)):
     """获取单个任务详情"""
     try:
-        config = scheduler_manager.db.get_task_config(task_id)
+        config = scheduler_manager.get_task_config(task_id)
         if not config:
             return Result.failed(f'任务 {task_id} 不存在', "E404")
 
@@ -35,15 +35,16 @@ def get_task(task_id: str, scheduler_manager: SchedulerManager = Depends(get_sch
         return Result.failed(str(e), "E500")
 
 @router.put('/tasks/{task_id}')
-def update_task(task_id: str, scheduler_manager: SchedulerManager = Depends(get_scheduler_manager)):
+def update_task(task_id: str, data: dict = Body(...), scheduler_manager: SchedulerManager = Depends(get_scheduler_manager)):
     """更新任务配置"""
     try:
-        data = request.get_json()
         if not data:
             return Result.failed('请提供JSON数据', "E400")
 
         enabled = data.get('enabled')
         interval_seconds = data.get('interval_seconds')
+        if enabled is None or interval_seconds is None:
+            return Result.failed('enabled和interval_seconds不可为None', "E400")
 
         if interval_seconds is not None:
             if not isinstance(interval_seconds, int) or interval_seconds <= 0:

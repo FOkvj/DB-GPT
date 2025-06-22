@@ -1,8 +1,8 @@
 from dbgpt._private.config import Config
 from dbgpt.component import ComponentType
 from dbgpt_app.expend.service.file_manager import PipelineWebManager
-from dbgpt_app.expend.service.file_scanner import FileScanner
-from dbgpt_app.expend.service.scheduler_manager import SchedulerManager
+from dbgpt_app.expend.service.file_scanner_v2 import FileScanner
+from dbgpt_app.expend.service.scheduler_manager_v2 import SchedulerManager
 
 from dbgpt_app.expend.service.speech2text import Speech2TextService
 from voice2text.tran.funasr_transcriber import FunASRTranscriber

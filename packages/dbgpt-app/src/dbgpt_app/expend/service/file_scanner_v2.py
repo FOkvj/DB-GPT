@@ -12,6 +12,7 @@ from dbgpt import BaseComponent, SystemApp
 from dbgpt.component import ComponentType
 from dbgpt_app.expend.dao.data_manager import SQLiteConfig, initialize_expend_db
 from dbgpt_app.expend.dao.file_scan_dao_v2 import ScanConfigDao, FileTypeDao, ProcessedFileDao, GlobalSettingDao
+from dbgpt_app.expend.model.file_scan import ScanConfigResponse
 
 
 class FileScanner(BaseComponent):
@@ -193,20 +194,20 @@ class FileScanner(BaseComponent):
             self.logger.error(f"删除扫描配置失败: {e}")
             return False
 
-    def get_scan_configs(self, enabled_only: bool = False) -> List[Dict]:
+    def get_scan_configs(self, enabled_only: bool = False) -> List[ScanConfigResponse]:
         """获取扫描配置列表"""
         try:
             if enabled_only:
                 results = self.scan_config_dao.get_enabled_configs()
             else:
                 results = self.scan_config_dao.get_list({})
-
-            configs = []
-            for result in results:
-                config = result.dict()
-                config['config'] = json.loads(config['config'])
-                configs.append(config)
-            return configs
+            return results
+            # configs = []
+            # for result in results:
+            #     config = result.dict()
+            #     config['config'] = json.loads(config['config'])
+            #     configs.append(config)
+            # return configs
         except Exception as e:
             self.logger.error(f"获取扫描配置列表失败: {e}")
             return []
@@ -510,15 +511,15 @@ class FileScanner(BaseComponent):
         scan_configs = self.get_scan_configs(enabled_only=True)
 
         for config in scan_configs:
-            if config['type'] == 'local':
-                new_files = self.scan_local_directory(config['config'])
+            if config.type == 'local':
+                new_files = self.scan_local_directory(config.config)
                 all_new_files.extend(new_files)
-                self.logger.info(f"本地目录 {config['name']} 发现 {len(new_files)} 个新文件")
+                self.logger.info(f"本地目录 {config.name} 发现 {len(new_files)} 个新文件")
 
-            elif config['type'] == 'ftp':
-                new_files = self.scan_ftp_directory(config['config'])
+            elif config.type == 'ftp':
+                new_files = self.scan_ftp_directory(config.config)
                 all_new_files.extend(new_files)
-                self.logger.info(f"FTP服务器 {config['name']} 发现 {len(new_files)} 个新文件")
+                self.logger.info(f"FTP服务器 {config.name} 发现 {len(new_files)} 个新文件")
 
         # 处理新文件
         success_count = 0

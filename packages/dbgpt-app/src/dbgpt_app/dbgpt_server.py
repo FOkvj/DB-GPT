@@ -142,9 +142,9 @@ def initialize_app(param: ApplicationConfig, args: List[str] = None):
     )
 
     server_init(param, system_app)
+    init_expend_modules(system_app)
     mount_routers(app)
     model_start_listener = _create_model_start_listener(system_app)
-    init_expend_modules(system_app)
     initialize_components(
         param,
         system_app,

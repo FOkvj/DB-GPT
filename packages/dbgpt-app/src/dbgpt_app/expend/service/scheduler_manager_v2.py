@@ -236,7 +236,7 @@ class SchedulerManager(BaseComponent):
             print(f"记录任务执行失败: {e}")
             return False
 
-    def update_task(self, task_id: str, enabled: bool = None, interval_seconds: int = None) -> Tuple[bool, str]:
+    def update_task(self, task_id: str, enabled: bool = False, interval_seconds: int = 10) -> Tuple[bool, str]:
         """更新任务配置"""
         try:
             # 检查任务是否存在
