@@ -107,6 +107,8 @@ class ComponentType(str, Enum):
     SCHEDULE_MANAGER = "schedule_manager"
     PIPELINE_MANAGER = "pipeline_manager"
     SPEECH_TO_TEXT = "speech_to_text"
+    MESSAGE_QUEUE_MANAGER = "message_queue_manager"
+    QUEUE_PROCESSOR_MANAGER = "queue_processor_manager"
 
 
 _EMPTY_DEFAULT_COMPONENT = "_EMPTY_DEFAULT_COMPONENT"

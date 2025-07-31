@@ -36,10 +36,11 @@ from dbgpt_app.component_configs import initialize_components
 from dbgpt_app.config import ApplicationConfig, ServiceWebParameters, SystemParameters
 from dbgpt_app.expend.main import init_expend_modules
 from dbgpt_serve.core import add_exception_handler
-from dbgpt_app.expend.router.file_manager_router import router as file_manager_router
 from dbgpt_app.expend.router.file_scan_config_router import router as file_scan_router
+from dbgpt_app.expend.router.file_manager_router import router as file_manager_router
 
 from dbgpt_app.expend.router.scheduler_router import router as scheduler_router
+from dbgpt_app.expend.router.pipeline_manager_router import router as pipeline_manager_router
 
 logger = logging.getLogger(__name__)
 ROOT_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -82,7 +83,8 @@ def mount_routers(app: FastAPI):
 
     app.include_router(file_scan_router, prefix="/api", tags=["文件扫描接口"])
     app.include_router(scheduler_router, prefix="/api", tags=["定时调度器"])
-    app.include_router(file_manager_router, prefix="/api", tags=["文件管理与自动转换相关"])
+    app.include_router(pipeline_manager_router, prefix="/api", tags=["自动转换相关"])
+    app.include_router(file_manager_router, prefix="/api", tags=["文件管理"])
 
 
     app.include_router(knowledge_router, tags=["Knowledge"])

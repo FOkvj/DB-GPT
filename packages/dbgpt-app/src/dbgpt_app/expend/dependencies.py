@@ -1,7 +1,7 @@
 from dbgpt._private.config import Config
 from dbgpt.component import ComponentType
-from dbgpt_app.expend.service.file_manager import PipelineWebManager
 from dbgpt_app.expend.service.file_scanner_v2 import FileScanner
+from dbgpt_app.expend.service.pipeline_manager import PipelineManager
 from dbgpt_app.expend.service.scheduler_manager_v2 import SchedulerManager
 
 from dbgpt_app.expend.service.speech2text import Speech2TextService
@@ -16,9 +16,9 @@ def get_scheduler_manager() -> SchedulerManager:
     """依赖注入：获取计划任务管理器实例"""
     return CFG.SYSTEM_APP.get_component(ComponentType.SCHEDULE_MANAGER, SchedulerManager)
 
-def get_pipeline_manager() -> PipelineWebManager:
+def get_pipeline_manager() -> PipelineManager:
     """依赖注入：获取管道管理器实例"""
-    return CFG.SYSTEM_APP.get_component(ComponentType.PIPELINE_MANAGER, PipelineWebManager)
+    return CFG.SYSTEM_APP.get_component(ComponentType.PIPELINE_MANAGER, PipelineManager)
 
 def get_speech2text_service() -> FunASRTranscriber:
     """依赖注入：获取语音转文字服务实例"""

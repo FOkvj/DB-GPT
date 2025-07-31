@@ -300,9 +300,7 @@ function SideBar() {
         icon: (
           <Image
             key='image_dataprocess'
-            src={
-              pathname.startsWith('/dataprocess') ? '/pictures/dataprocess_active.png' : '/pictures/dataprocess.png'
-            }
+            src={pathname.startsWith('/dataprocess') ? '/pictures/dataprocess_active.png' : '/pictures/dataprocess.png'}
             alt='dataprocess_image'
             width={40}
             height={40}

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.12-management  # 带管理插件的版本
+    container_name: rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"   # AMQP 协议端口（Python客户端使用）
+      - "15672:15672" # 管理界面端口（默认用户 guest/guest）
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq  # 持久化数据
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin      # 自定义用户名
+      - RABBITMQ_DEFAULT_PASS=123456    # 自定义密码
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rabbitmq_data:

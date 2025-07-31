@@ -217,7 +217,7 @@ export const startTask = (taskId: string, config?: AxiosRequestConfig) =>
   POST<void, string>(`/api/tasks/${taskId}/start`, undefined, config);
 
 export const stopTask = (taskId: string, config?: AxiosRequestConfig) =>
-  POST<void, string>(`/api/tasks/${taskId}/stop`, undefined, config);
+  OST<void, string>(`/api/tasks/${taskId}/stop`, undefined, config);
 
 export const getTaskExecutions = (taskId: string, limit: number = 50, config?: AxiosRequestConfig) =>
   GET<{ limit: number }, TaskExecution[]>(`/api/tasks/${taskId}/executions`, { limit }, config);

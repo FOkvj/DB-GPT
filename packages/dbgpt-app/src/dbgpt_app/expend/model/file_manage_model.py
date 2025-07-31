@@ -1,27 +1,28 @@
-from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, List
 
 
-class FileStatus(Enum):
-    """文件状态枚举"""
-    PENDING = "pending"  # 待处理
-    PROCESSING = "processing"  # 处理中
-    COMPLETED = "completed"  # 已完成
-    FAILED = "failed"  # 处理失败
-    SKIPPED = "skipped"  # 已跳过
+class AudioFileType(str, Enum):
+    """音频文件类型枚举"""
+    # 无损音频格式
+    WAV = ".wav"
+    FLAC = ".flac"
+    AIFF = ".aiff"
+    AU = ".au"
+    APE = ".ape"
 
+    # 有损音频格式
+    MP3 = ".mp3"
+    AAC = ".aac"
+    M4A = ".m4a"
+    OGG = ".ogg"
+    WMA = ".wma"
+    OPUS = ".opus"
 
-@dataclass
-class FileInfo:
-    """文件信息数据类"""
-    path: str
-    name: str
-    size: int
-    created_time: str
-    modified_time: str
-    extension: str
-    status: FileStatus
-    processors: List[str]
-    last_processed: Optional[str] = None
-    error_message: Optional[str] = None
+    # 其他音频格式
+    AMR = ".amr"
+    CAF = ".caf"
+    DSD = ".dsd"
+    MKA = ".mka"
+    RA = ".ra"
+    AC3 = ".ac3"
+    DTS = ".dts"

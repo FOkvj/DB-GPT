@@ -9,11 +9,19 @@ from pathlib import Path
 from typing import Dict, Optional, List
 
 from dbgpt import BaseComponent, SystemApp
+from dbgpt._private.config import Config
 from dbgpt.component import ComponentType
+from dbgpt.core.interface.file import FileStorageClient, StreamedBytesIO
 from dbgpt_app.expend.dao.data_manager import SQLiteConfig, initialize_expend_db
+from dbgpt_app.expend.dao.file_process_dao import FileProcessingDao, FileProcessingRequest, SourceType, ProcessStatus, \
+    FileProcessingResponse
 from dbgpt_app.expend.dao.file_scan_dao_v2 import ScanConfigDao, FileTypeDao, ProcessedFileDao, GlobalSettingDao
+from dbgpt_app.expend.model.file_process import ProcessTopic
 from dbgpt_app.expend.model.file_scan import ScanConfigResponse
+from dbgpt_app.expend.service.queue.mq import RabbitMQManager
+from dbgpt_app.expend.utils.file_type_utils import get_topic_by_file_type
 
+CFG = Config()
 
 class FileScanner(BaseComponent):
     """文件扫描器核心类"""
@@ -30,8 +38,11 @@ class FileScanner(BaseComponent):
 
         self.setup_logging()
         self._init_default_settings()
+        self.file_process_dao = FileProcessingDao()
+        self.system_app = None
 
     def init_app(self, system_app: SystemApp):
+        self.system_app = system_app
         pass
 
     def setup_logging(self):
@@ -251,23 +262,23 @@ class FileScanner(BaseComponent):
 
         return True, "文件有效"
 
-    def is_file_processed(self, file_id: str) -> bool:
-        """检查文件是否已被处理"""
-        try:
-            return self.processed_file_dao.is_file_processed(file_id)
-        except Exception as e:
-            self.logger.error(f"检查文件处理状态失败: {e}")
-            return False
-
-    def mark_file_processed(self, file_id: str, source_type: str, source_path: str,
-                            file_name: str, file_size: int, file_hash: str, target_path: str):
-        """标记文件为已处理"""
-        try:
-            self.processed_file_dao.mark_file_processed(
-                file_id, source_type, source_path, file_name, file_size, file_hash, target_path
-            )
-        except Exception as e:
-            self.logger.error(f"标记文件处理状态失败: {e}")
+    # def is_file_processed(self, file_id: str) -> bool:
+    #     """检查文件是否已被处理"""
+    #     try:
+    #         return self.processed_file_dao.is_file_processed(file_id)
+    #     except Exception as e:
+    #         self.logger.error(f"检查文件处理状态失败: {e}")
+    #         return False
+    #
+    # def mark_file_processed(self, file_id: str, source_type: str, source_id: str, source_path: str,
+    #                         file_name: str, file_size: int, file_hash: str):
+    #     """标记文件为已处理"""
+    #     try:
+    #         self.processed_file_dao.mark_file_processed(
+    #             file_id, source_type, source_path, file_name, file_size, file_hash, target_path
+    #         )
+    #     except Exception as e:
+    #         self.logger.error(f"标记文件处理状态失败: {e}")
 
     # ==================== 扫描功能 ====================
 
@@ -337,8 +348,9 @@ class FileScanner(BaseComponent):
 
         return new_files
 
-    def scan_ftp_directory(self, config: Dict) -> List[Dict]:
-        """扫描FTP目录"""
+    def scan_ftp_directory(self, config_info: ScanConfigResponse) -> List[Dict]:
+        """扫描FTP目录，兼容Windows和Unix格式"""
+        config = config_info.config
         new_files = []
         ftp = None
 
@@ -365,43 +377,55 @@ class FileScanner(BaseComponent):
             valid_count = 0
 
             for line in file_list:
-                parts = line.split()
-                if len(parts) >= 9 and not line.startswith('d'):
-                    scanned_count += 1
-                    filename = ' '.join(parts[8:])
+                line = line.strip()
+                if not line:
+                    continue
 
-                    # 先检查扩展名
-                    file_ext = Path(filename).suffix.lower()
-                    if file_ext not in valid_extensions:
+                parsed_file = self._parse_ftp_line(line)
+                if not parsed_file:
+                    continue
+
+                # 跳过目录
+                if parsed_file['is_directory']:
+                    continue
+
+                scanned_count += 1
+                filename = parsed_file['filename']
+                file_size = parsed_file['file_size']
+                file_time = parsed_file['file_time']
+
+                # 先检查扩展名
+                file_ext = Path(filename).suffix.lower()
+                if file_ext not in valid_extensions:
+                    continue
+
+                try:
+                    is_valid, reason = self.is_valid_file(filename, file_size)
+
+                    if not is_valid:
+                        self.logger.debug(f"跳过FTP文件 {filename}: {reason}")
                         continue
 
-                    try:
-                        file_size = int(parts[4])
-                        is_valid, reason = self.is_valid_file(filename, file_size)
+                    valid_count += 1
 
-                        if not is_valid:
-                            self.logger.debug(f"跳过FTP文件 {filename}: {reason}")
-                            continue
+                    source_file_id = f"ftp_{config['host']}_{config['remote_dir']}{filename}_{file_size}_{file_time}"
 
-                        valid_count += 1
-                        file_time = ' '.join(parts[5:8])
-
-                        file_id = f"ftp_{config['host']}_{filename}_{file_size}_{file_time}"
-
-                        if not self.is_file_processed(file_id):
-                            file_info = {
-                                'file_id': file_id,
-                                'source_type': 'ftp',
-                                'source_path': f"{config['host']}{config.get('remote_dir', '/')}{filename}",
-                                'file_name': filename,
-                                'file_size': file_size,
-                                'file_hash': '',
-                                'ftp_config': config
-                            }
-                            new_files.append(file_info)
-                    except ValueError as e:
-                        self.logger.debug(f"无法解析FTP文件大小 {filename}: {e}")
-                        continue
+                    if not self.is_file_processed(source_file_id):
+                        file_info = {
+                            'source_file_id': source_file_id,
+                            'source_type': 'ftp',
+                            'file_type': Path(filename).suffix.lower(),
+                            'config_id': config_info.name,
+                            'source_path': f"{config['host']}{config.get('remote_dir', '/')}{filename}",
+                            'file_name': filename,
+                            'file_size': file_size,
+                            'file_hash': '',
+                            'ftp_config': config
+                        }
+                        new_files.append(file_info)
+                except Exception as e:
+                    self.logger.debug(f"处理FTP文件信息失败 {filename}: {e}")
+                    continue
 
             self.logger.info(f"FTP扫描完成: 总文件数={scanned_count}, 符合条件={valid_count}, 新文件={len(new_files)}")
 
@@ -415,6 +439,108 @@ class FileScanner(BaseComponent):
                     pass
 
         return new_files
+
+    def _parse_ftp_line(self, line: str) -> Dict:
+        """解析FTP LIST输出行，兼容Windows和Unix格式"""
+        line = line.strip()
+        if not line:
+            return None
+
+        # 检查是否为Windows格式 (MM-dd-yy HH:mmAM/PM)
+        if self._is_windows_format(line):
+            return self._parse_windows_format(line)
+        else:
+            # Unix格式
+            return self._parse_unix_format(line)
+
+    def _is_windows_format(self, line: str) -> bool:
+        """检查是否为Windows FTP格式"""
+        # Windows格式通常以日期开始: MM-dd-yy
+        import re
+        windows_pattern = r'^\d{2}-\d{2}-\d{2}\s+\d{1,2}:\d{2}[AP]M'
+        return bool(re.match(windows_pattern, line))
+
+    def _parse_windows_format(self, line: str) -> Dict:
+        """解析Windows FTP格式
+        例如: '04-19-25  10:44PM               470136 A_B_C_20231212_122300_jyen2.mp3'
+             '06-22-25  11:44PM       <DIR>          dir'
+        """
+        try:
+            parts = line.split()
+            if len(parts) < 3:
+                return None
+
+            date_part = parts[0]  # MM-dd-yy
+            time_part = parts[1]  # HH:mmAM/PM
+            file_time = f"{date_part} {time_part}"
+
+            # 检查是否为目录
+            is_directory = '<DIR>' in line
+
+            if is_directory:
+                # 目录格式: date time <DIR> dirname
+                if len(parts) >= 4:
+                    filename = ' '.join(parts[3:])
+                    return {
+                        'filename': filename,
+                        'file_size': 0,
+                        'file_time': file_time,
+                        'is_directory': True
+                    }
+            else:
+                # 文件格式: date time size filename
+                if len(parts) >= 4:
+                    try:
+                        file_size = int(parts[2])
+                        filename = ' '.join(parts[3:])
+                        return {
+                            'filename': filename,
+                            'file_size': file_size,
+                            'file_time': file_time,
+                            'is_directory': False
+                        }
+                    except ValueError:
+                        # 文件大小解析失败
+                        return None
+
+        except Exception as e:
+            self.logger.debug(f"解析Windows格式失败: {line}, 错误: {e}")
+
+        return None
+
+    def _parse_unix_format(self, line: str) -> Dict:
+        """解析Unix FTP格式
+        例如: 'drwxr-xr-x 2 user group 4096 Jan 1 12:00 dirname'
+             '-rw-r--r-- 1 user group 1234 Jan 1 12:00 filename.txt'
+        """
+        try:
+            parts = line.split()
+            if len(parts) < 9:
+                return None
+
+            permissions = parts[0]
+            is_directory = permissions.startswith('d')
+
+            try:
+                file_size = int(parts[4])
+            except ValueError:
+                file_size = 0
+
+            file_time = ' '.join(parts[5:8])
+            filename = ' '.join(parts[8:])
+
+            return {
+                'filename': filename,
+                'file_size': file_size,
+                'file_time': file_time,
+                'is_directory': is_directory
+            }
+
+        except Exception as e:
+            self.logger.debug(f"解析Unix格式失败: {line}, 错误: {e}")
+
+        return None
+
 
     def process_file(self, file_info: Dict) -> bool:
         """处理单个文件"""
@@ -446,20 +572,7 @@ class FileScanner(BaseComponent):
         if file_info['source_type'] == 'local':
             success = self._copy_local_file(file_info['source_path'], target_path)
         elif file_info['source_type'] == 'ftp':
-            success = self._download_ftp_file(file_info, target_path)
-
-        if success:
-            self.mark_file_processed(
-                file_info['file_id'],
-                file_info['source_type'],
-                file_info['source_path'],
-                file_info['file_name'],
-                file_info['file_size'],
-                file_info.get('file_hash', ''),
-                target_path
-            )
-            self.logger.info(f"成功处理文件: {filename} ({file_size / 1024 / 1024:.2f}MB)")
-
+            success = self._process_ftp_file(file_info)
         return success
 
     def _copy_local_file(self, source_path: str, target_path: str) -> bool:
@@ -472,9 +585,12 @@ class FileScanner(BaseComponent):
             self.logger.error(f"复制本地文件失败: {e}")
             return False
 
-    def _download_ftp_file(self, file_info: Dict, target_path: str) -> bool:
+    def _process_ftp_file(self, file_info: Dict, target_bucket: str = "scanned") -> bool:
         """下载FTP文件"""
         ftp = None
+        fs: FileStorageClient = FileStorageClient.get_instance(
+                CFG.SYSTEM_APP, default_component=None
+            )
         try:
             config = file_info['ftp_config']
             ftp = FTP()
@@ -483,11 +599,48 @@ class FileScanner(BaseComponent):
 
             if config.get('remote_dir'):
                 ftp.cwd(config['remote_dir'])
+            # 将文件上传到文件系统
+            file_meta = FileProcessingRequest(
+                                                  file_id=file_info["source_file_id"],
+                                                  file_name=file_info["file_name"],
+                                                  source_type=SourceType.FTP,
+                                                  source_id=file_info["config_id"],
+                                                  source_file_id=file_info["source_file_id"],
+                                                  size=file_info["file_size"],
+                                                  file_type=file_info["file_type"],
+                                                  file_hash=file_info["file_hash"],
+                                                  status=ProcessStatus.DOWNLOADING,
+                                                      start_time=datetime.now(),
+                                            )
+            response: FileProcessingResponse = self.file_process_dao.create(file_meta)
 
-            with open(target_path, 'wb') as f:
-                ftp.retrbinary(f'RETR {file_info["file_name"]}', f.write)
+            from io import BytesIO
 
-            self.logger.info(f"已下载FTP文件: {file_info['file_name']} -> {target_path}")
+            file_data = BytesIO()
+
+            def write_data(data):
+                file_data.write(data)
+
+            # Download file data using retrbinary with callback
+            ftp.retrbinary(f'RETR {file_info["file_name"]}', write_data)
+
+            # Reset position to beginning for reading
+            file_data.seek(0)
+
+            # Save to file storage
+            file_id = fs.save_file(
+                bucket=target_bucket,
+                file_name=file_info["file_name"],
+                file_data=file_data
+            )
+            file_meta.file_id = file_id
+            file_meta.end_time = datetime.now()
+            file_meta.status = ProcessStatus.WAIT
+            self.file_process_dao.update_file_processing(response.id, **file_meta.dict())
+            # 将文件元数据写入队列
+            mq_manager: RabbitMQManager = CFG.SYSTEM_APP.get_component(ComponentType.MESSAGE_QUEUE_MANAGER, RabbitMQManager)
+            mq_manager.publish_point_to_point(get_topic_by_file_type(file_info["file_type"]), file_meta)
+            self.logger.info(f"已下载FTP文件: {file_info['file_name']} -> {file_id}")
             return True
 
         except Exception as e:
@@ -499,6 +652,7 @@ class FileScanner(BaseComponent):
                     ftp.quit()
                 except:
                     pass
+
 
     # ==================== 主扫描方法 ====================
 
@@ -517,7 +671,7 @@ class FileScanner(BaseComponent):
                 self.logger.info(f"本地目录 {config.name} 发现 {len(new_files)} 个新文件")
 
             elif config.type == 'ftp':
-                new_files = self.scan_ftp_directory(config.config)
+                new_files = self.scan_ftp_directory(config)
                 all_new_files.extend(new_files)
                 self.logger.info(f"FTP服务器 {config.name} 发现 {len(new_files)} 个新文件")
 
@@ -593,6 +747,10 @@ class FileScanner(BaseComponent):
         except Exception as e:
             self.logger.error(f"清空已处理文件记录失败: {e}")
             return False
+
+    def is_file_processed(self, source_file_id):
+        processed_files = self.file_process_dao.get_files_by_source_file_id(source_file_id)
+        return processed_files is not None and len(processed_files) > 0
 
 
 def main():

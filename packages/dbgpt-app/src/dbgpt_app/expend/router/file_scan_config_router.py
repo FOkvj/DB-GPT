@@ -275,8 +275,38 @@ async def test_ftp_connection(
             "connected": False,
             "error": None,
             "root_files": [],
-            "remote_dir_status": None
+            "remote_dir_status": None,
+            "encoding_used": None,
+            "encoding_test_results": []
         }
+
+        def safe_decode_line(line, encoding='gbk'):
+            """安全解码FTP返回的行数据"""
+            if isinstance(line, bytes):
+                try:
+                    return line.decode(encoding)
+                except UnicodeDecodeError:
+                    # 如果指定编码失败，尝试其他编码
+                    for fallback_encoding in ['gbk', 'gb2312', 'utf-8', 'cp936', 'iso-8859-1']:
+                        try:
+                            return line.decode(fallback_encoding)
+                        except UnicodeDecodeError:
+                            continue
+                    # 最后使用错误忽略模式
+                    return line.decode('gbk', errors='ignore')
+            return line
+
+        def test_encoding(ftp, encoding):
+            """测试特定编码是否工作"""
+            try:
+                ftp.encoding = encoding
+                test_files = []
+                ftp.retrlines('LIST', test_files.append)
+                return True, test_files
+            except UnicodeDecodeError:
+                return False, []
+            except Exception as e:
+                return False, [f"Error: {str(e)}"]
 
         try:
             ftp = FTP()
@@ -291,26 +321,66 @@ async def test_ftp_connection(
             try:
                 ftp.login(ftp_config.username, ftp_config.password)
 
-                # 获取根目录文件列表
-                try:
-                    root_files = []
-                    ftp.retrlines('LIST', root_files.append)
-                    result["root_files"] = root_files[:20]  # 限制返回前20个文件
-                except error_perm as e:
-                    result["root_files"] = f"无法列出文件: {str(e)}"
+                # 测试不同编码
+                encodings_to_test = ['gbk', 'utf-8', 'gb2312', 'cp936']
+                working_encoding = None
+
+                for encoding in encodings_to_test:
+                    success, files = test_encoding(ftp, encoding)
+                    result["encoding_test_results"].append({
+                        "encoding": encoding,
+                        "success": success,
+                        "file_count": len(files) if success else 0
+                    })
+
+                    if success and not working_encoding:
+                        working_encoding = encoding
+                        result["root_files"] = files[:20]  # 限制返回前20个文件
+                        result["encoding_used"] = encoding
+
+                # 如果所有编码都失败，使用手动解码方式
+                if not working_encoding:
+                    try:
+                        # 重置为默认编码
+                        ftp.encoding = 'utf-8'
+                        raw_files = []
+
+                        def safe_callback(line):
+                            decoded_line = safe_decode_line(line, 'gbk')
+                            raw_files.append(decoded_line)
+
+                        ftp.retrlines('LIST', safe_callback)
+                        result["root_files"] = raw_files[:20]
+                        result["encoding_used"] = "manual_gbk_fallback"
+
+                    except Exception as e:
+                        result["root_files"] = f"无法列出文件 (编码问题): {str(e)}"
 
                 # 测试远程目录（如果配置了）
                 if ftp_config.remote_dir:
                     try:
                         ftp.cwd(ftp_config.remote_dir)
                         result["remote_dir_status"] = f"成功切换到目录: {ftp_config.remote_dir}"
+
+                        # 尝试列出远程目录的文件
+                        if working_encoding:
+                            ftp.encoding = working_encoding
+                            remote_files = []
+                            ftp.retrlines('LIST', remote_files.append)
+                            result["remote_dir_files"] = remote_files[:10]
+
                     except error_perm as e:
                         result["remote_dir_status"] = f"无法切换到目录 {ftp_config.remote_dir}: {str(e)}"
+                    except Exception as e:
+                        result["remote_dir_status"] = f"远程目录操作出错: {str(e)}"
 
             except error_perm as e:
                 result["error"] = f"登录失败: {str(e)}"
 
-            ftp.quit()
+            try:
+                ftp.quit()
+            except:
+                pass  # 忽略退出时的错误
 
         except socket.timeout:
             result["error"] = "连接超时"
