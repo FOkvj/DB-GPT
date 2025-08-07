@@ -58,7 +58,7 @@ const { Option } = Select;
 // Available language options
 const languageOptions = [
   { value: 'zh-CN', label: '中文 (简体)' },
-  { value: 'en-US', label: '英语 (美国)' },
+  { value: 'auto', label: '自动' },
 ];
 
 // Available model options
@@ -306,24 +306,87 @@ const VoiceModule: React.FC = () => {
   };
 
   // Voice profile management - Add new profile
-  const addNewVoiceProfile = async (): Promise<void> => {
-    try {
-      const newName = `用户${voiceProfiles.length + 1}`;
-      const [err, data] = await apiInterceptors(createVoiceProfile(newName));
-
-      if (err) {
-        messageApi.error(`添加声纹失败: ${err.message}`);
+  const addNewVoiceProfile = (): void => {
+    // 创建一个隐藏的文件输入元素
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.mp3,.wav,.ogg,.m4a';
+    fileInput.style.display = 'none';
+    
+    fileInput.onchange = async (event: Event) => {
+      const target = event.target as HTMLInputElement;
+      const file = target.files?.[0];
+      
+      if (!file) {
+        messageApi.warning('请选择音频文件');
         return;
       }
-
-      if (data) {
-        setVoiceProfiles([...voiceProfiles, data]);
-        messageApi.success('已添加新声纹');
-      }
-    } catch (error: any) {
-      messageApi.error(`添加声纹时出错: ${error.message}`);
-    }
+  
+      // 弹出对话框让用户输入声纹名称
+      let profileName = '';
+      
+      const modal = Modal.confirm({
+        title: '添加新声纹',
+        content: (
+          <div>
+            <p style={{ marginBottom: 16 }}>已选择文件: {file.name}</p>
+            <Input
+              placeholder="请输入声纹名称"
+              defaultValue={`用户${voiceProfiles.length + 1}`}
+              onChange={(e) => {
+                profileName = e.target.value;
+              }}
+              onPressEnter={() => {
+                modal.destroy();
+                handleCreateProfile(profileName || `用户${voiceProfiles.length + 1}`, file);
+              }}
+            />
+          </div>
+        ),
+        onOk: () => {
+          return handleCreateProfile(profileName || `用户${voiceProfiles.length + 1}`, file);
+        },
+        onCancel: () => {
+          // 清理文件输入
+          document.body.removeChild(fileInput);
+        }
+      });
+    };
+    
+    // 触发文件选择
+    document.body.appendChild(fileInput);
+    fileInput.click();
   };
+  
+  // 处理创建声纹的实际逻辑
+const handleCreateProfile = async (name: string, file: File): Promise<void> => {
+  try {
+    messageApi.loading({
+      content: '正在创建声纹...',
+      key: 'create-profile',
+      duration: 0,
+    });
+
+    const [err, data] = await apiInterceptors(createVoiceProfile(name, file));
+
+    messageApi.destroy('create-profile');
+
+    if (err) {
+      messageApi.error(`添加声纹失败: ${err.message}`);
+      return;
+    }
+
+    if (data) {
+      // 重新获取声纹列表
+      await fetchVoiceProfiles();
+      messageApi.success('已添加新声纹');
+    }
+  } catch (error: any) {
+    messageApi.destroy('create-profile');
+    messageApi.error(`添加声纹时出错: ${error.message}`);
+  }
+};
+
 
   // Start editing profile name
   const startEditingProfileName = (profile: VoiceProfile): void => {
@@ -336,14 +399,15 @@ const VoiceModule: React.FC = () => {
     if (editingProfileId !== null) {
       try {
         const [err, data] = await apiInterceptors(updateVoiceProfile(editingProfileId, editingName));
-
+  
         if (err) {
           messageApi.error(`更新声纹名称失败: ${err.message}`);
           return;
         }
-
+  
         if (data) {
-          setVoiceProfiles(voiceProfiles.map(profile => (profile.id === editingProfileId ? data : profile)));
+          // 成功后重新获取整个profiles列表
+          await fetchVoiceProfiles();
           messageApi.success('名称已更新');
         }
       } catch (error: any) {

@@ -8,27 +8,31 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Optional
 
+from fastapi.responses import FileResponse
 # 初始化FunASR转写器
 from fastapi import APIRouter
 from fastapi import Query, Form, File, UploadFile, BackgroundTasks
 from fastapi.params import Depends
-from fastapi.responses import FileResponse
 from sqlalchemy import inspect
+from voice2text.tran.schema.dto import ApiResponse, VoicePrintInfo
+from voice2text.tran.schema.prints import SampleInfo
 
 from dbgpt.core.interface.file import FileStorageClient
 from dbgpt.util.executor_utils import blocking_func_to_async
 from dbgpt_app.expend.dependencies import get_speech2text_service
 from dbgpt_app.expend.excel2db import ExtendedMySQLConnector, ExcelToMysql
+from dbgpt_app.expend.service.speech2text import Speech2TextService
 from dbgpt_app.knowledge.api import get_fs
 from dbgpt_app.openapi.api_view_model import (
     Result,
 )
-from voice2text.tran.funasr_transcriber import FunASRTranscriber
+
+# from voice2text.tran.funasr_transcriber import Speech2TextService
 
 # 导入我们的FunASR转写服务
 
 #
-# transcriber = FunASRTranscriber(
+# transcriber = Speech2TextService(
 #     device="cpu",
 #     funasr_model="paraformer-zh",
 #     funasr_model_revision="v2.0.4",
@@ -252,7 +256,7 @@ from voice2text.tran.server import parse_filename
 @router.post("/v1/expand/voiceprocess/voice2text")
 async def voice2text(
         # 通过Query从URL中获取的参数
-        language: str = Query("zh-CN", description="识别语言"),
+        language: str = Query("auto", description="识别语言"),
         model: str = Query("default", description="识别模型"),
         enablePunctuation: str = Query("true", description="是否启用标点符号"),
         speakerDiarization: str = Query("true", description="是否启用说话人分离"),
@@ -262,7 +266,7 @@ async def voice2text(
         threshold: Optional[float] = Query(0.5, description="声纹匹配阈值"),
         hotword: Optional[str] = Query("", description="热词"),
         background_tasks: BackgroundTasks = BackgroundTasks(),
-        transcriber = Depends(get_speech2text_service)
+        transcriber: Speech2TextService = Depends(get_speech2text_service)
 ):
     """
     语音转文字处理API
@@ -310,17 +314,14 @@ async def voice2text(
                 process_start_time = time.time()
 
                 # 异步调用转写函数
-                transcription_result = await blocking_func_to_async(
-                    ThreadPoolExecutor(max_workers=1),
-                    transcriber.transcribe_file,
-                    audio_file_path=file_path,
-                    auto_register_unknown=auto_register and enable_speaker_diarization,
-                    threshold=threshold,
-                    file_location=location,
-                    file_date=date,
-                    file_time=record_time,
-                    hotword=hotword
-                )
+                transcription_result = await transcriber.transcribe_file(audio_file_path=file_path,
+                                                        language=language,
+                                                        hotword=hotword,
+                                                       threshold=threshold,
+                                                       auto_register_unknown=auto_register,
+                                                       file_location=location,
+                                                       file_date=date,
+                                                       file_time=record_time)
 
                 # 提取结果
                 text = transcription_result["transcript"]
@@ -418,82 +419,71 @@ async def voice2text(
         background_tasks.add_task(cleanup)
 
 
-# 获取声纹样本文件 - 新API
+
 @router.get("/v1/expand/voiceprofile/sample/{sample_id}")
-async def get_voice_sample(sample_id: str, transcriber: FunASRTranscriber = Depends(get_speech2text_service)):
+async def get_voice_sample(sample_id: str, transcriber: Speech2TextService = Depends(get_speech2text_service)):
     """
     获取声纹样本文件
     """
     try:
         # 从样本ID获取文件路径
-        sample_path = transcriber.voice_print_manager.get_sample_path_by_id(sample_id)
+        file_id = sample_id.split(":")[-1]  # 只取最后一部分作为文件ID
+        tmp_path = tempfile.gettempdir() + f"{file_id}.wav"
+        success = await transcriber.download_file(file_id=file_id, file_path=tmp_path)
 
-        if not sample_path or not os.path.exists(sample_path):
+        if not success:
             raise HTTPException(status_code=404, detail="样本文件不存在")
 
-        return FileResponse(sample_path, media_type="audio/wav")
+        # 确保指针在开始位置
+        # sample_data.seek(0)
+
+        return FileResponse(tmp_path, media_type="audio/wav")
 
     except Exception as e:
         logger.error(f"获取声纹样本失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取声纹样本失败: {str(e)}")
 
 
+def make_profile(samples: List[VoicePrintInfo]):
+    profiles = []
+    for voice_print in samples:
+        # 生成声纹档案数据
+        sample_list = voice_print.sample_list
+        final_samples = []
+        for sample in sample_list:
+            final_samples.append({
+                "id": f"{sample.speaker_id}:{sample.audio_file_id}",
+                "name": sample.filename,
+                "duration": sample.audio_duration,
+                "uploadDate": sample.created_at,
+                "url": f"/v1/expand/voiceprofile/sample/{sample.audio_file_id}"
+            })
+        profile_data = {
+            "id": voice_print.speaker_id,  # 使用声纹ID作为标识
+            "name": voice_print.speaker_id,
+            "type": "named" if voice_print.named else "unnamed",
+            "samples": final_samples,
+            "sampleCount": len(voice_print.sample_list)
+        }
+        profiles.append(profile_data)
+    return profiles
+
 # 获取所有声纹档案
 @router.get("/v1/expand/voiceprofile/list")
-async def list_voice_profiles(include_unnamed: bool = Query(True, description="是否包含未命名声纹"), transcriber: FunASRTranscriber = Depends(get_speech2text_service)):
+async def list_voice_profiles(include_unnamed: bool = Query(True, description="是否包含未命名声纹"), transcriber: Speech2TextService = Depends(get_speech2text_service)):
     """
     获取所有声纹档案
     """
     try:
         # 获取声纹数据
-        voice_print_data = transcriber.list_registered_voices(include_unnamed=include_unnamed)
+        voice_print_data: ApiResponse[List[VoicePrintInfo]] = await transcriber.list_registered_voices(include_unnamed=include_unnamed)
 
         # 获取所有声纹样本路径
-        all_samples = transcriber.voice_print_manager.get_voiceprint_sample_paths()
+        if not voice_print_data.success:
+            return Result.failed(code="E0202", msg="获取声纹数据失败")
 
         # 格式化为前端所需的数据结构
-        profiles = []
-
-        # 处理命名声纹
-        for name, samples_list in all_samples.items():
-            # 跳过未命名声纹(如果不需要)
-            if name.startswith("Speaker_") and not include_unnamed:
-                continue
-
-            # 生成样本数据
-            samples = []
-            for sample_id in samples_list:
-                # 获取样本文件路径
-                sample_path = transcriber.voice_print_manager.get_sample_path_by_id(sample_id)
-                if sample_path and os.path.exists(sample_path):
-                    # 获取文件大小和修改时间
-                    file_stats = os.stat(sample_path)
-                    file_size = file_stats.st_size
-                    mod_time = datetime.fromtimestamp(file_stats.st_mtime)
-
-                    # 计算音频时长（估计值，实际应从文件读取）
-                    duration_sec = file_size / 32000  # 粗略估计：16kHz, 16bit
-                    minutes = int(duration_sec // 60)
-                    seconds = int(duration_sec % 60)
-
-                    samples.append({
-                        "id": sample_id,
-                        "name": os.path.basename(sample_path),
-                        "duration": f"{minutes}:{seconds:02d}",
-                        "uploadDate": mod_time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "url": f"/v1/expand/voiceprofile/sample/{sample_id}"
-                    })
-
-            # 生成声纹档案数据
-            profile_data = {
-                "id": name,  # 使用声纹ID作为标识
-                "name": name if not name.startswith("Speaker_") else f"未命名_{name[8:16]}",
-                "type": "named" if not name.startswith("Speaker_") else "unnamed",
-                "samples": samples,
-                "sampleCount": len(samples)
-            }
-
-            profiles.append(profile_data)
+        profiles = make_profile(voice_print_data.data)
 
         return Result.succ({"profiles": profiles})
 
@@ -507,7 +497,7 @@ async def list_voice_profiles(include_unnamed: bool = Query(True, description="�
 async def create_voice_profile(
         name: str = Form(..., description="声纹名称"),
         file: Optional[UploadFile] = File(None, description="音频文件（可选）"),
-        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
+        transcriber: Speech2TextService = Depends(get_speech2text_service)
 ):
     """
     创建新声纹档案
@@ -526,49 +516,19 @@ async def create_voice_profile(
                 f.write(content)
 
             # 注册声纹
-            voice_print_id, sample_id = transcriber.register_voice(name, file_path)
+            result = await transcriber.register_voice(name, file_path)
+            voice_print_data: ApiResponse[List[VoicePrintInfo]] = await transcriber.list_registered_voices(
+                include_unnamed=True)
+
+            # 获取所有声纹样本路径
+            if not voice_print_data.success:
+                return Result.failed(code="E0301", msg="获取声纹数据失败")
+
+            # 格式化为前端所需的数据结构
+            profiles = make_profile(voice_print_data.data)
+            return Result.succ(profiles)
         else:
-            # 创建空声纹目录
-            voice_prints_dir = transcriber.voice_print_manager.voice_prints_dir
-            voice_print_path = os.path.join(voice_prints_dir, name)
-            if os.path.exists(voice_print_path):
-                return Result.failed(code="E0303", msg=f"声纹名称 '{name}' 已存在")
-
-            os.makedirs(voice_print_path, exist_ok=True)
-            voice_print_id = name
-            sample_id = None
-
-        # 构造返回数据
-        profile_data = {
-            "id": voice_print_id,
-            "name": name,
-            "type": "named",
-            "samples": []
-        }
-
-        # 如果上传了音频文件，添加样本信息
-        if sample_id:
-            sample_path = transcriber.voice_print_manager.get_sample_path_by_id(sample_id)
-            if sample_path and os.path.exists(sample_path):
-                # 获取文件大小和修改时间
-                file_stats = os.stat(sample_path)
-                file_size = file_stats.st_size
-                mod_time = datetime.fromtimestamp(file_stats.st_mtime)
-
-                # 计算音频时长（估计值）
-                duration_sec = file_size / 32000  # 粗略估计
-                minutes = int(duration_sec // 60)
-                seconds = int(duration_sec % 60)
-
-                profile_data["samples"].append({
-                    "id": sample_id,
-                    "name": os.path.basename(sample_path),
-                    "duration": f"{minutes}:{seconds:02d}",
-                    "uploadDate": mod_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "url": f"/v1/expand/voiceprofile/sample/{sample_id}"
-                })
-
-        return Result.succ(profile_data)
+            Result.failed(code="E0301", msg=f"未提供音频文件，无法创建声纹档案")
 
     except Exception as e:
         logger.error(f"创建声纹失败: {str(e)}")
@@ -588,55 +548,27 @@ async def create_voice_profile(
 async def update_voice_profile(
         id: str = Form(..., description="声纹ID"),
         name: str = Form(..., description="新声纹名称"),
-        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
+        transcriber: Speech2TextService = Depends(get_speech2text_service)
 ):
     """
     更新声纹档案名称
     """
     try:
         # 调用声纹重命名方法
-        success = transcriber.rename_voice_print(id, name)
+        success = await transcriber.rename_voice_print(id, name)
 
         if not success:
+
             return Result.failed(code="E0402", msg=f"更新声纹名称失败，目标名称可能已存在或原声纹不存在")
 
         # 获取更新后的声纹样本信息
-        samples_list = transcriber.voice_print_manager.get_voiceprint_sample_paths(name)
-        samples = []
+        voice_print_data: ApiResponse[List[VoicePrintInfo]] = await transcriber.list_registered_voices(
+            include_unnamed=True)
 
-        # 处理样本信息
-        if name in samples_list:
-            for sample_id in samples_list[name]:
-                sample_path = transcriber.voice_print_manager.get_sample_path_by_id(sample_id)
-                if sample_path and os.path.exists(sample_path):
-                    # 获取文件大小和修改时间
-                    file_stats = os.stat(sample_path)
-                    file_size = file_stats.st_size
-                    mod_time = datetime.fromtimestamp(file_stats.st_mtime)
-
-                    # 计算音频时长（估计值）
-                    duration_sec = file_size / 32000
-                    minutes = int(duration_sec // 60)
-                    seconds = int(duration_sec % 60)
-
-                    samples.append({
-                        "id": sample_id,
-                        "name": os.path.basename(sample_path),
-                        "duration": f"{minutes}:{seconds:02d}",
-                        "uploadDate": mod_time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "url": f"/v1/expand/voiceprofile/sample/{sample_id}"
-                    })
-
-        # 返回更新后的声纹信息
-        profile_data = {
-            "id": name,
-            "name": name,
-            "type": "named",
-            "samples": samples,
-            "sampleCount": len(samples)
-        }
-
-        return Result.succ(profile_data)
+        # 获取所有声纹样本路径
+        if not voice_print_data.success:
+            return Result.failed(code="E0301", msg="获取声纹数据失败")
+        return Result.succ(success)
 
     except Exception as e:
         logger.error(f"更新声纹名称失败: {str(e)}")
@@ -645,30 +577,16 @@ async def update_voice_profile(
 
 # 删除声纹档案
 @router.post("/v1/expand/voiceprofile/delete")
-async def delete_voice_profile(id: str = Form(..., description="声纹ID"), transcriber: FunASRTranscriber = Depends(get_speech2text_service)):
+async def delete_voice_profile(id: str = Form(..., description="声纹ID"), transcriber: Speech2TextService = Depends(get_speech2text_service)):
     """
     删除声纹档案
     """
     try:
         # 获取声纹目录路径
-        voice_prints_dir = transcriber.voice_print_manager.voice_prints_dir
-        voice_print_path = os.path.join(voice_prints_dir, id)
-
-        # 检查声纹是否存在
-        if not os.path.exists(voice_print_path) or not os.path.isdir(voice_print_path):
-            return Result.failed(code="E0502", msg=f"声纹 '{id}' 不存在")
-
-        # 删除声纹目录及所有样本
-        shutil.rmtree(voice_print_path)
-
-        # 从缓存中删除声纹
-        if id in transcriber.voice_print_manager.voice_prints_cache:
-            del transcriber.voice_print_manager.voice_prints_cache[id]
-        elif id in transcriber.voice_print_manager.unnamed_voice_prints_cache:
-            del transcriber.voice_print_manager.unnamed_voice_prints_cache[id]
-
-        # 保存更新后的缓存
-        transcriber.voice_print_manager._save_embedding_cache()
+        speaker_id = id.split(":")[0]  # 只取最后一部分作为声纹ID
+        success = await transcriber.delete_speaker(speaker_id)
+        if not success:
+            return Result.failed(code="E0502", msg=f"删除声纹失败，声纹ID '{id}' 可能不存在")
 
         return Result.succ({"success": True, "message": f"声纹 '{id}' 已成功删除"})
 
@@ -682,7 +600,7 @@ async def delete_voice_profile(id: str = Form(..., description="声纹ID"), tran
 async def add_voice_sample(
         profileId: str = Form(..., description="声纹ID"),
         file: UploadFile = File(..., description="音频文件"),
-        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
+        transcriber: Speech2TextService = Depends(get_speech2text_service)
 ):
     """
     添加声纹样本
@@ -747,14 +665,15 @@ async def add_voice_sample(
 @router.post("/v1/expand/voiceprofile/deletesample")
 async def delete_voice_sample(
         sampleId: str = Form(..., description="样本ID"),
-        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
+        transcriber: Speech2TextService = Depends(get_speech2text_service)
 ):
     """
     删除声纹样本
     """
     try:
         # 调用声纹管理器删除样本
-        success = transcriber.voice_print_manager.delete_sample(sampleId)
+        speaker_id, audio_file_id = sampleId.split(":")
+        success = await transcriber.delete_audio_sample(speaker_id, audio_file_id)
 
         if not success:
             return Result.failed(code="E0702", msg=f"删除声纹样本失败，样本ID '{sampleId}' 可能不存在")
@@ -771,13 +690,18 @@ async def delete_voice_sample(
 
 # 清空所有声纹
 @router.post("/v1/expand/voiceprofile/clear")
-async def clear_voice_profiles(transcriber: FunASRTranscriber = Depends(get_speech2text_service)):
+async def clear_voice_profiles(transcriber: Speech2TextService = Depends(get_speech2text_service)):
     """
     清空所有声纹数据
     """
     try:
-        # 调用声纹管理器清空所有声纹
-        transcriber.clear_voice_prints()
+        voice_print_data: ApiResponse[List[VoicePrintInfo]] = await transcriber.list_registered_voices()
+        if not voice_print_data.success:
+            return Result.failed(code="E0802", msg="获取声纹数据失败，无法清空")
+        for voice_print in voice_print_data.data:
+            speaker_id = voice_print.speaker_id
+            await transcriber.delete_speaker(speaker_id)
+
 
         return Result.succ({
             "success": True,
@@ -793,7 +717,7 @@ async def clear_voice_profiles(transcriber: FunASRTranscriber = Depends(get_spee
 @router.post("/v1/expand/voiceprofile/batchregister")
 async def batch_register_voice_profiles(
         directory: str = Form(..., description="包含音频文件的目录路径"),
-        transcriber: FunASRTranscriber = Depends(get_speech2text_service)
+        transcriber: Speech2TextService = Depends(get_speech2text_service)
 ):
     """
     从目录批量注册声纹
@@ -820,8 +744,6 @@ from fastapi import HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 import os
 import urllib.parse
-from pathlib import Path
-import aiofiles
 from typing import AsyncGenerator
 import mimetypes
 

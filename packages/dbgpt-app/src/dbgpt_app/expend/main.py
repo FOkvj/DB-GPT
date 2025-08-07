@@ -30,9 +30,8 @@ def init_expend_modules(system_app: SystemApp):
     scheduler_manager = SchedulerManager()
     mq_manager = RabbitMQManager()
     processor_manager = MessageQueueProcessorManager(mq_manager)
-    speech2text_service = Speech2TextService()
+    speech2text_service = Speech2TextService(server_url="http://localhost:8765")
 
-    # speech2text_service.init()
     audio_processor = AudioToTextProcessor(
         transcriber=speech2text_service,
         mq_manager=mq_manager,
