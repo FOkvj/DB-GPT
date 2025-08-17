@@ -20,6 +20,6 @@ def get_pipeline_manager() -> PipelineManager:
     """依赖注入：获取管道管理器实例"""
     return CFG.SYSTEM_APP.get_component(ComponentType.PIPELINE_MANAGER, PipelineManager)
 
-def get_speech2text_service() -> FunASRTranscriber:
+def get_speech2text_service() -> Speech2TextService:
     """依赖注入：获取语音转文字服务实例"""
-    return CFG.SYSTEM_APP.get_component(ComponentType.SPEECH_TO_TEXT, Speech2TextService).transcriber
+    return CFG.SYSTEM_APP.get_component(ComponentType.SPEECH_TO_TEXT, Speech2TextService)

@@ -239,7 +239,7 @@ class AudioToTextProcessor(MessageQueueProcessorInterface):
             )
 
             # 发送新文件到knowledge处理队列
-            self.mq_manager.publish_point_to_point(ProcessTopic.TO_KNOWLEDGE.value, new_file_meta.dict())
+            self.mq_manager.publish_point_to_point(ProcessTopic.TO_KNOWLEDGE.value, new_file_meta.model_dump())
 
             self.logger.info(f"语音转文字完成: {transcript_filename}")
 
