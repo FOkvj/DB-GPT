@@ -1,4 +1,9 @@
+<<<<<<< HEAD
 docker service create --name portainer0 \
+=======
+docker service create \
+  --name portainer \
+>>>>>>> c46ff7e1ed481140b1f41e6422bc5e390d5f7eca
   --publish published=9443,target=9443 \
   --publish published=9000,target=9000 \
   --publish published=8000,target=8000 \
