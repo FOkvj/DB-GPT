@@ -194,7 +194,7 @@ class AudioToTextProcessor(MessageQueueProcessorInterface):
                 )
 
             # 提取转写结果
-            transcript_text = transcription_result.data['transcript']
+            transcript_text = transcription_result['transcript']
 
             # 生成转写文件名
             transcript_filename = f"{Path(file_meta.file_name).stem}_transcript.txt"
@@ -220,7 +220,7 @@ class AudioToTextProcessor(MessageQueueProcessorInterface):
                 file_id=transcript_file_id,
                 file_name=transcript_filename,
                 source_type=SourceType.STT.value,
-                source_id=f"audio_processor",
+                source_id=file_meta.source_id,
                 size=len(transcript_text.encode('utf-8')),
                 file_type='.txt',
                 file_hash=self._calculate_hash(transcript_text),
@@ -342,7 +342,9 @@ class KnowledgeProcessor(MessageQueueProcessorInterface):
     async def process_message(self, file_meta: FileProcessingRequest) -> None:
         """处理知识库加工"""
         try:
+            self.logger.info(f"开始处理文件: {file_meta}")
             mapping: KnowledgeBaseMappingDaoResponse = self.knowledge_mapping_dao.get_mapping_by_scan_config_name(file_meta.source_id)
+            self.logger.info(f"获取知识库映射信息: {mapping}")
             # 生成知识库空间名
             space_name = file_meta.file_name if mapping is None else mapping.knowledge_base_name
             if mapping is None:

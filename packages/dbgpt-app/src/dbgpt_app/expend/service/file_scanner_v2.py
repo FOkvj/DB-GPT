@@ -640,7 +640,7 @@ class FileScanner(BaseComponent):
             # 将文件元数据写入队列
             mq_manager: RabbitMQManager = CFG.SYSTEM_APP.get_component(ComponentType.MESSAGE_QUEUE_MANAGER, RabbitMQManager)
             mq_manager.publish_point_to_point(get_topic_by_file_type(file_info["file_type"]), file_meta)
-            self.logger.info(f"已下载FTP文件: {file_info['file_name']} -> {file_id}")
+            self.logger.info(f"已下载FTP文件: {file_meta} -> {file_id}")
             return True
 
         except Exception as e:

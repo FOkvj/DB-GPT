@@ -5,7 +5,7 @@ from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 # 设置要共享的目录
-shared_directory = "./"
+shared_directory = "/home/t16/文档/dbgpt-ftp-扫描根目录"
 
 authorizer = DummyAuthorizer()
 # 添加用户（用户名，密码，共享目录，权限）

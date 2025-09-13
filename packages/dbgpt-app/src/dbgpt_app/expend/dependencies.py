@@ -5,7 +5,6 @@ from dbgpt_app.expend.service.pipeline_manager import PipelineManager
 from dbgpt_app.expend.service.scheduler_manager_v2 import SchedulerManager
 
 from dbgpt_app.expend.service.speech2text import Speech2TextService
-from voice2text.tran.funasr_transcriber import FunASRTranscriber
 
 CFG = Config()
 def get_scanner() -> FileScanner:
